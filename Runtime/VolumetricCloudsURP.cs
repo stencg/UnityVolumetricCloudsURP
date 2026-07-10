@@ -253,7 +253,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         if (volumetricCloudsPass == null)
         {
             volumetricCloudsPass = new(material, resolutionScale);
-            volumetricCloudsPass.renderPassEvent = RenderPassEvent.AfterRenderingPrePasses - 1; // Use camera previous matrix to do reprojection
+            volumetricCloudsPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents; // Use camera previous matrix to do reprojection
         }
         else
         {
@@ -491,6 +491,12 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private static readonly int shBg = Shader.PropertyToID("clouds_SHBg");
         private static readonly int shBb = Shader.PropertyToID("clouds_SHBb");
         private static readonly int shC = Shader.PropertyToID("clouds_SHC");
+
+        // Main light globals — set manually in the raster pass because URP's light
+        // setup unsafe pass has no resource dependency on the clouds pass and may be
+        // reordered after it by the render graph compiler.
+        private static readonly int mainLightPositionID = Shader.PropertyToID("_MainLightPosition");
+        private static readonly int mainLightColorID = Shader.PropertyToID("_MainLightColor");
 
         private const string localClouds = "_LOCAL_VOLUMETRIC_CLOUDS";
         private const string microErosion = "_CLOUDS_MICRO_EROSION";
@@ -1066,18 +1072,20 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
             internal TextureHandle cameraColorHandle;
             internal TextureHandle cameraDepthHandle;
+            internal Vector4 mainLightPosition;
+            internal Vector4 mainLightColor;
         }
 
         // This static method is used to execute the pass and passed as the RenderFunc delegate to the RenderGraph render pass
-        static void ExecutePass(PassData data, RasterGraphContext context)
+        static void ExecutePass(PassData data, UnsafeGraphContext context)
         {
             if (!data.cameraColorHandle.IsValid() || ((RTHandle)data.cameraColorHandle).rt == null)
                 return;
 
-            RasterCommandBuffer cmd = context.cmd;
+            CommandBuffer cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
 
             // Clouds Upscale & Combine
-            Blitter.BlitTexture(cmd, data.cloudsColorHandle, new Vector4(1, 1, 0, 0), data.cloudsMaterial, pass: data.hasAtmosphericScattering ? 7 : 1);
+            Blitter.BlitCameraTexture(cmd, data.cloudsColorHandle, data.cameraColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, data.cloudsMaterial, pass: data.hasAtmosphericScattering ? 7 : 1);
 
 #if VC_DEPTH
             if (data.outputToSceneDepth)
@@ -1111,6 +1119,8 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
 #if VC_DEPTH
             context.cmd.SetRenderTarget(data.cameraColorHandle, data.activeDepthHandle);
+#else
+            context.cmd.SetRenderTarget(data.cameraColorHandle);
 #endif // VC_DEPTH
         }
 
@@ -1120,6 +1130,12 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 return;
 
             RasterCommandBuffer cmd = rgContext.cmd;
+
+            // Ensure main light globals are available for the clouds shader.
+            // URP's ForwardLights setup pass may execute after this pass in the render graph,
+            // so we set them here to guarantee GetMainLight() returns valid data.
+            cmd.SetGlobalVector(mainLightPositionID, data.mainLightPosition);
+            cmd.SetGlobalVector(mainLightColorID, data.mainLightColor);
 
 #if VC_DEPTH
             data.cloudsMaterial.SetTexture(cameraDepthTexture, data.cameraDepthHandle);
@@ -1140,12 +1156,31 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             // add a raster render pass to the render graph, specifying the name and the data type that will be passed to the ExecuteRasterPass function
             using (var builder = renderGraph.AddRasterRenderPass<RasterPassData>(rasterPassProfilerTag, out var rasterPassData))
             {
+                // Raster passes do not allow global state modification by default.
+                // We need it to set _MainLightPosition/_MainLightColor for the clouds shader.
+                builder.AllowGlobalStateModification(true);
+
                 Light mainLight = GetMainLight(lightData);
                 UpdateClouds(mainLight, cameraData.camera);
 
+                // Pass main light data to ExecuteRasterPass so it can set _MainLightPosition/_MainLightColor globals
+                if (mainLight != null)
+                {
+                    Vector4 dir = -mainLight.transform.localToWorldMatrix.GetColumn(2);
+                    rasterPassData.mainLightPosition = new Vector4(dir.x, dir.y, dir.z, 0.0f);
+                    bool isLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
+                    Color lightColor = (isLinearColorSpace ? mainLight.color.linear : mainLight.color.gamma) * (mainLight.useColorTemperature ? Mathf.CorrelatedColorTemperatureToRGB(mainLight.colorTemperature) : Color.white) * mainLight.intensity;
+                    rasterPassData.mainLightColor = lightColor;
+                }
+                else
+                {
+                    rasterPassData.mainLightPosition = Vector4.zero;
+                    rasterPassData.mainLightColor = Vector4.zero;
+                }
+
 #if ZERO
-                // Get the active color texture through the frame data, and set it as the source texture for the blit
-                rasterPassData.cameraColorHandle = resourceData.activeColorTexture;
+               // Get the active color texture through the frame data, and set it as the source texture for the blit
+               rasterPassData.cameraColorHandle = resourceData.activeColorTexture;
 #if VC_DEPTH
                 rasterPassData.cameraDepthHandle = resourceData.cameraDepthTexture;
 #endif // VC_DEPTH
@@ -1206,7 +1241,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             }
 
             // add an unsafe render pass to the render graph, specifying the name and the data type that will be passed to the ExecutePass function
-            using (var builder = renderGraph.AddRasterRenderPass<PassData>(profilerTag, out var passData, m_ProfilingSampler))
+            using (var builder = renderGraph.AddUnsafePass<PassData>(profilerTag, out var passData, m_ProfilingSampler))
             {
 #if ZERO
                 // Get the active color texture through the frame data, and set it as the source texture for the blit
@@ -1287,11 +1322,11 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
                 // UnsafePasses don't setup the outputs using UseTextureFragment/UseTextureFragmentDepth, you should specify your writes with UseTexture instead
 #if VC_DEPTH
-                builder.UseTexture(passData.cameraColorHandle, passData.denoiseClouds ? AccessFlags.ReadWrite : AccessFlags.Write);
                 builder.UseTexture(passData.activeDepthHandle, AccessFlags.None);
                 if (passData.outputToSceneDepth)
                     builder.UseTexture(passData.cameraDepthHandle, AccessFlags.Read);
 #endif // VC_DEPTH
+                builder.UseTexture(passData.cameraColorHandle, passData.denoiseClouds ? AccessFlags.ReadWrite : AccessFlags.Write);
                 builder.UseTexture(passData.cloudsColorHandle, AccessFlags.None);
 #if VC_DENOISE
                 if (passData.denoiseClouds)
@@ -1303,7 +1338,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #endif // ZERO
 
                 // Assign the ExecutePass function to the render pass delegate, which will be called by the render graph when executing the pass
-                builder.SetRenderFunc(static (PassData data, RasterGraphContext context) => ExecutePass(data, context));
+                builder.SetRenderFunc(static (PassData data, UnsafeGraphContext context) => ExecutePass(data, context));
             }
         }
         #endregion

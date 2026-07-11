@@ -555,7 +555,7 @@ public class VolumetricCloudsUtilities
 
             if (_CLOUDS_MICRO_EROSION)
             {
-                float3 fineCoords = AnimateErosionNoisePosition(positionPS) / (NOISE_TEXTURE_NORMALIZATION_FACTOR * _MicroErosionScale);
+                float3 fineCoords = AnimateErosionNoisePosition(positionPS) / NOISE_TEXTURE_NORMALIZATION_FACTOR * _MicroErosionScale;
                 float fineNoise = 1.0f - SAMPLE_TEXTURE3D_LOD(_ErosionNoise, s_linear_repeat_sampler, fineCoords, CLOUD_DETAIL_MIP_OFFSET + erosionMipOffset);
                 fineNoise = lerp(0.0f, fineNoise, microDetailFactor * 0.5f * cloudCoverageData.coverage);
                 base_cloud = DensityRemap(base_cloud, fineNoise, 1.0f, 0.0f, 1.0f);
@@ -1231,7 +1231,7 @@ public class VolumetricCloudsUtilities
 
                 if (_CLOUDS_MICRO_EROSION)
                 {
-                    float3 fineCoords = AnimateErosionNoisePosition(positionPS, _WindVector, _SmallWindSpeed, _VerticalErosionWindDisplacement) / (NOISE_TEXTURE_NORMALIZATION_FACTOR * _MicroErosionScale);
+                    float3 fineCoords = AnimateErosionNoisePosition(positionPS, _WindVector, _SmallWindSpeed, _VerticalErosionWindDisplacement) / NOISE_TEXTURE_NORMALIZATION_FACTOR * _MicroErosionScale;
                     float fineNoise = 1.0f - SAMPLE_TEXTURE3D_LOD(_ErosionNoise, fineCoords, _ErosionNoiseWidth, _ErosionNoiseHeight);
                     fineNoise = lerp(0.0f, fineNoise, microDetailFactor * 0.5f * cloudCoverageData.coverage);
                     base_cloud = DensityRemap(base_cloud, fineNoise, 1.0f, 0.0f, 1.0f);

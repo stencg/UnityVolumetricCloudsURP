@@ -492,7 +492,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private static readonly int shBb = Shader.PropertyToID("clouds_SHBb");
         private static readonly int shC = Shader.PropertyToID("clouds_SHC");
 
-        // Main light globals — set manually in the raster pass because URP's light
+        // Main light globals ï¿½ set manually in the raster pass because URP's light
         // setup unsafe pass has no resource dependency on the clouds pass and may be
         // reordered after it by the render graph compiler.
         private static readonly int mainLightPositionID = Shader.PropertyToID("_MainLightPosition");
@@ -577,7 +577,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             else { cloudsMaterial.DisableKeyword(localClouds); }
 #endif
 
-            if (cloudsVolume.microErosion.value && cloudsVolume.microErosionFactor.value > 0.0f) { cloudsMaterial.EnableKeyword(microErosion); }
+            if (cloudsVolume.microErosion.value) { cloudsMaterial.EnableKeyword(microErosion); }
             else { cloudsMaterial.DisableKeyword(microErosion); }
 
             if (resolutionScale < 1.0f && upscaleMode == CloudsUpscaleMode.Bilateral) { cloudsMaterial.EnableKeyword(lowResClouds); }

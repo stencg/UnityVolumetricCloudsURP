@@ -474,7 +474,7 @@ void EvaluateCloudProperties(float3 positionPS, float noiseMipOffset, float eros
         base_cloud = DensityRemap(base_cloud, erosionNoise, 1.0, 0.0, 1.0);
 
         #if defined(_CLOUDS_MICRO_EROSION)
-        float3 fineCoords = AnimateErosionNoisePosition(positionPS) / (NOISE_TEXTURE_NORMALIZATION_FACTOR * _MicroErosionScale);
+        float3 fineCoords = AnimateErosionNoisePosition(positionPS) / NOISE_TEXTURE_NORMALIZATION_FACTOR * _MicroErosionScale;
         half fineNoise = 1.0 - SAMPLE_TEXTURE3D_LOD(_ErosionNoise, s_linear_repeat_sampler, fineCoords, CLOUD_DETAIL_MIP_OFFSET + erosionMipOffset).x;
         fineNoise = lerp(0.0, fineNoise, microDetailFactor * 0.5 * cloudCoverageData.coverage.x);
         base_cloud = DensityRemap(base_cloud, fineNoise, 1.0, 0.0, 1.0);

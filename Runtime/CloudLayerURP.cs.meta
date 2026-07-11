@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 40ba2dd612814bc1bf5d1e334a1e6c7c
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - _cloudLayerShader: {fileID: 4800000, guid: d01b31cdcdae4821be7fc5f82cf2ebad, type: 3}
+  - _bakeCloudTexture: {fileID: 7200000, guid: 9fbc7d8eb2c74ac997574d0ea9bd5a71, type: 3}
+  - _bakeCloudShadows: {fileID: 7200000, guid: 70477203a22c4588b8a3cd305c6b50be, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

@@ -1,0 +1,300 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+#pragma kernel BakeCloudTexture
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
+
+#define CLOUD_LAYER_MULTI_SCATTERING_OCTAVES 2
+#define CLOUD_LAYER_FORWARD_ECCENTRICITY 0.7
+#define CLOUD_LAYER_BACKWARD_ECCENTRICITY 0.3
+#define CLOUD_LAYER_MULTI_SCATTERING 0.75
+
+TEXTURE2D(_CloudMapA);
+SAMPLER(sampler_CloudMapA);
+
+TEXTURE2D(_CloudMapB);
+SAMPLER(sampler_CloudMapB);
+
+RWTexture2DArray<float2> _CloudTexture;
+
+float4 _BakeParams;
+float4 _CloudMapOpacityA;
+float4 _CloudMapOpacityB;
+float4 _CloudMapBakeParamsA;
+float4 _CloudMapBakeParamsB;
+float _Resolution;
+int _LayerCount;
+
+#define CLOUD_LAYER_SUN_DIRECTION _BakeParams.xyz
+#define CLOUD_LAYER_UPPER_HEMISPHERE (_BakeParams.w > 0.0)
+#define CLOUD_LAYER_PLANET_RADIUS abs(_BakeParams.w)
+
+struct CloudLayerSamplingData
+{
+    float4 weights;
+    float3 sunDirection;
+    float rotation;
+    float lightingSteps;
+    float extinction;
+    float lowestAltitude;
+};
+
+float2 CloudLayerIntersectSphere(float sphereRadius, float cosChi, float radialDistance)
+{
+    float radiusRatio = sphereRadius / radialDistance;
+    float discriminant = radiusRatio * radiusRatio - saturate(1.0 - cosChi * cosChi);
+    return discriminant < 0.0
+        ? discriminant
+        : radialDistance * float2(-cosChi - sqrt(discriminant), -cosChi + sqrt(discriminant));
+}
+
+float CloudLayerComputeCosineOfHorizon(float radialDistance)
+{
+    float sine = CLOUD_LAYER_PLANET_RADIUS / radialDistance;
+    return -sqrt(saturate(1.0 - sine * sine));
+}
+
+bool CloudLayerIntersectVolume(
+    float3 originPS,
+    float3 direction,
+    float lowerBoundPS,
+    float upperBoundPS,
+    out float entryDistance,
+    out float exitDistance)
+{
+    float radialDistance = length(originPS);
+    float cosChi = dot(originPS, direction) / radialDistance;
+    float2 innerIntersection = CloudLayerIntersectSphere(lowerBoundPS, cosChi, radialDistance);
+    float2 outerIntersection = CloudLayerIntersectSphere(upperBoundPS, cosChi, radialDistance);
+
+    if (innerIntersection.x < 0.0 && innerIntersection.y >= 0.0)
+    {
+        entryDistance = innerIntersection.y;
+        exitDistance = outerIntersection.y;
+        return cosChi >= CloudLayerComputeCosineOfHorizon(radialDistance);
+    }
+
+    entryDistance = max(outerIntersection.x, 0.0);
+    exitDistance = innerIntersection.x >= 0.0 ? innerIntersection.x : outerIntersection.y;
+    return outerIntersection.y >= 0.0;
+}
+
+float CloudLayerExitVolume(float3 originPS, float3 direction, float upperBoundPS)
+{
+    float radialDistance = length(originPS);
+    float cosChi = dot(originPS, direction) / radialDistance;
+    return CloudLayerIntersectSphere(upperBoundPS, cosChi, radialDistance).y;
+}
+
+float2 CloudLayerGetLatLongCoords(float3 direction, bool upperHemisphereOnly)
+{
+    const float2 inverseAtan = float2(0.1591, 0.3183);
+    float2 uv = float2(FastAtan2(direction.x, direction.z), FastASin(direction.y)) * inverseAtan + 0.5;
+    uv.y = upperHemisphereOnly ? uv.y * 2.0 - 1.0 : uv.y;
+    return uv;
+}
+
+float3 CloudLayerRotationUp(float3 direction, float2 cosineSine)
+{
+    float3 axisX = float3(cosineSine.x, 0.0, -cosineSine.y);
+    float3 axisY = float3(cosineSine.y, 0.0, cosineSine.x);
+    return float3(dot(axisX, direction), direction.y, dot(axisY, direction));
+}
+
+float3 CloudLayerInverseLatLong(float2 uv, bool upperHemisphereOnly)
+{
+    const float2 inverseAtan = float2(0.1591, 0.3183);
+    uv.y = upperHemisphereOnly ? uv.y * 0.5 + 0.5 : uv.y;
+    uv = (uv - 0.5) / inverseAtan;
+
+    float y = sin(uv.y);
+    float scale = sqrt(1.0 - y * y);
+    return float3(sin(uv.x) * scale, y, cos(uv.x) * scale);
+}
+
+void CloudLayerGetVolumeIntersection(
+    CloudLayerSamplingData data,
+    float3 direction,
+    out float rangeStart,
+    out float range)
+{
+    float entryDistance;
+    float exitDistance;
+    CloudLayerIntersectVolume(
+        float3(0.0, CLOUD_LAYER_PLANET_RADIUS, 0.0),
+        direction,
+        data.lowestAltitude,
+        data.lowestAltitude + 800.0,
+        entryDistance,
+        exitDistance);
+    rangeStart = entryDistance;
+    range = exitDistance - entryDistance;
+}
+
+float CloudLayerSampleMap(
+    CloudLayerSamplingData data,
+    TEXTURE2D(cloudMap),
+    SAMPLER(cloudMapSampler),
+    float2 uv)
+{
+    float4 mapValue = SAMPLE_TEXTURE2D_LOD(cloudMap, cloudMapSampler, uv, 0);
+    float4 weightedValue = mapValue * data.weights;
+    return weightedValue.r + weightedValue.g + weightedValue.b + weightedValue.a;
+}
+
+float CloudLayerGetDensity(
+    CloudLayerSamplingData data,
+    TEXTURE2D(cloudMap),
+    SAMPLER(cloudMapSampler),
+    float3 positionWS)
+{
+    float3 direction = normalize(positionWS);
+    float thickness = CloudLayerSampleMap(
+        data,
+        cloudMap,
+        cloudMapSampler,
+        CloudLayerGetLatLongCoords(direction, CLOUD_LAYER_UPPER_HEMISPHERE));
+
+    float rangeStart;
+    float range;
+    CloudLayerGetVolumeIntersection(data, direction, rangeStart, range);
+    float distanceToCenter = length(direction * (rangeStart + 0.5 * range) - positionWS);
+    return distanceToCenter > range * thickness ? 0.0 : 0.1 * thickness;
+}
+
+float CloudLayerEvaluateSunLuminance(
+    CloudLayerSamplingData data,
+    TEXTURE2D(cloudMap),
+    SAMPLER(cloudMapSampler),
+    float3 positionWS,
+    float phaseFunction[CLOUD_LAYER_MULTI_SCATTERING_OCTAVES])
+{
+    int lightSteps = (int)data.lightingSteps;
+    float luminance = 0.0;
+    float extinction = 0.0;
+    float lightDistance = CloudLayerExitVolume(
+        positionWS + float3(0.0, CLOUD_LAYER_PLANET_RADIUS, 0.0),
+        data.sunDirection,
+        data.lowestAltitude + 800.0);
+    lightDistance = clamp(lightDistance, 0.0, 500.0);
+    float stepSize = lightDistance / lightSteps;
+
+    for (int step = 1; step <= lightSteps; ++step)
+    {
+        float3 samplePosition = positionWS + data.sunDirection * stepSize * step;
+        extinction += CloudLayerGetDensity(data, cloudMap, cloudMapSampler, samplePosition);
+    }
+
+    for (int octave = 0; octave < CLOUD_LAYER_MULTI_SCATTERING_OCTAVES; ++octave)
+    {
+        float scattering = PositivePow(CLOUD_LAYER_MULTI_SCATTERING, octave);
+        luminance += exp(-stepSize * extinction * data.extinction * scattering)
+            * phaseFunction[octave]
+            * scattering;
+    }
+
+    return luminance;
+}
+
+float2 CloudLayerComputeLighting(
+    TEXTURE2D(cloudMap),
+    SAMPLER(cloudMapSampler),
+    float2 uv,
+    float4 opacityWeights,
+    float4 bakeParameters)
+{
+    CloudLayerSamplingData data;
+    data.weights = opacityWeights / max(dot(opacityWeights, 1.0), 1.0);
+    data.rotation = bakeParameters.x;
+    data.lightingSteps = bakeParameters.y;
+    data.extinction = bakeParameters.z;
+    data.lowestAltitude = bakeParameters.w + CLOUD_LAYER_PLANET_RADIUS;
+    data.sunDirection = CloudLayerRotationUp(
+        CLOUD_LAYER_SUN_DIRECTION,
+        float2(cos(data.rotation * TWO_PI), sin(data.rotation * TWO_PI)));
+
+    float opacity = CloudLayerSampleMap(data, cloudMap, cloudMapSampler, uv);
+    float2 finalColor = opacity;
+
+    if ((int)data.lightingSteps != 0)
+    {
+        float3 direction = CloudLayerInverseLatLong(uv, CLOUD_LAYER_UPPER_HEMISPHERE);
+        float cosAngle = dot(direction, data.sunDirection);
+        float phaseFunction[CLOUD_LAYER_MULTI_SCATTERING_OCTAVES];
+
+        for (int octave = 0; octave < CLOUD_LAYER_MULTI_SCATTERING_OCTAVES; ++octave)
+        {
+            float scattering = PositivePow(CLOUD_LAYER_MULTI_SCATTERING, octave);
+            float forwardPhase = HenyeyGreensteinPhaseFunction(
+                CLOUD_LAYER_FORWARD_ECCENTRICITY * scattering,
+                cosAngle);
+            float backwardPhase = HenyeyGreensteinPhaseFunction(
+                -CLOUD_LAYER_BACKWARD_ECCENTRICITY * scattering,
+                cosAngle);
+            phaseFunction[octave] = backwardPhase + forwardPhase;
+        }
+
+        float rangeStart;
+        float range;
+        CloudLayerGetVolumeIntersection(data, direction, rangeStart, range);
+        float3 samplePosition = direction * (rangeStart + 0.5 * (1.0 - opacity) * range);
+        finalColor = 0.0;
+
+        if (opacity != 0.0)
+        {
+            float sigmaE = 0.1 * opacity * data.extinction;
+            float stepTransmittance = exp(-sigmaE * range * opacity);
+            float luminance = CloudLayerEvaluateSunLuminance(
+                data,
+                cloudMap,
+                cloudMapSampler,
+                samplePosition,
+                phaseFunction);
+            finalColor.x = luminance - luminance * stepTransmittance;
+            finalColor.y = 1.0 - stepTransmittance;
+        }
+    }
+
+    return finalColor;
+}
+
+[numthreads(8, 8, 1)]
+void BakeCloudTexture(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    uint slices;
+    _CloudTexture.GetDimensions(width, height, slices);
+
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height || dispatchThreadId.z >= (uint)_LayerCount)
+        return;
+
+    float2 uv = float2(dispatchThreadId.x * _Resolution, dispatchThreadId.y * _Resolution);
+    float4 bakeParameters = dispatchThreadId.z == 0 ? _CloudMapBakeParamsA : _CloudMapBakeParamsB;
+    uv.x -= bakeParameters.x;
+
+    if (CLOUD_LAYER_UPPER_HEMISPHERE)
+        uv.y *= 2.0;
+
+    float2 cloudValue;
+    if (dispatchThreadId.z == 0)
+    {
+        cloudValue = CloudLayerComputeLighting(
+            _CloudMapA,
+            sampler_CloudMapA,
+            uv,
+            _CloudMapOpacityA,
+            _CloudMapBakeParamsA);
+    }
+    else
+    {
+        cloudValue = CloudLayerComputeLighting(
+            _CloudMapB,
+            sampler_CloudMapB,
+            uv,
+            _CloudMapOpacityB,
+            _CloudMapBakeParamsB);
+    }
+
+    _CloudTexture[dispatchThreadId] = cloudValue;
+}

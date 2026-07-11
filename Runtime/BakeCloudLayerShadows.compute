@@ -1,0 +1,56 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+#pragma kernel BakeCloudShadows
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.jiaozi158.unity-volumetric-clouds-urp/Runtime/CloudLayerCommon.hlsl"
+
+RWTexture2D<float3> _CloudShadows;
+
+float _Resolution;
+float4 _ShadowParams;
+
+float CloudLayerComputeShadow(float2 uv)
+{
+    const float projectionWidth = 0.2;
+    float3 direction = _SunDirection
+        + uv.x * projectionWidth * _CloudLayerParamsA.xyz
+        - uv.y * projectionWidth * _CloudLayerParamsB.xyz;
+    return CloudLayerRender(normalize(direction)).a;
+}
+
+[numthreads(8, 8, 1)]
+void BakeCloudShadows(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _CloudShadows.GetDimensions(width, height);
+
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+        return;
+
+    float2 uv = float2(dispatchThreadId.x * _Resolution, 1.0 - dispatchThreadId.y * _Resolution) * 2.0 - 1.0;
+    float shadow = CloudLayerComputeShadow(uv);
+
+    const float tiling = 0.5;
+    float2 borderUV = uv - (1.0 - tiling);
+    float2 weights = saturate(borderUV / tiling);
+    weights.x = Smoothstep01(weights.x);
+    weights.y = Smoothstep01(weights.y);
+
+    if (borderUV.x > 0.0)
+        shadow = lerp(shadow, CloudLayerComputeShadow(uv - float2(2.0, 0.0)), weights.x);
+
+    if (borderUV.y > 0.0)
+    {
+        float wrappedShadow = CloudLayerComputeShadow(uv - float2(0.0, 2.0));
+        if (borderUV.x > 0.0)
+            wrappedShadow = lerp(wrappedShadow, CloudLayerComputeShadow(uv - float2(2.0, 2.0)), weights.x);
+
+        shadow = lerp(shadow, wrappedShadow, weights.y);
+    }
+
+    _CloudShadows[dispatchThreadId] = lerp(
+        float3(1.0, 1.0, 1.0),
+        _ShadowParams.rgb,
+        saturate(shadow * _ShadowParams.a));
+}

@@ -226,7 +226,11 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         private bool _hasBakingHash;
         private bool _cloudTextureDirty = true;
         private int _preparedFrame = -1;
+#if UNITY_6000_4_OR_NEWER
+        private EntityId _preparedCameraId;
+#else
         private int _preparedCameraId;
+#endif
         private float _lastTime = -1.0f;
         private float _scrollFactorA;
         private float _scrollFactorB;
@@ -253,7 +257,11 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
 
         internal void Prepare(CloudLayer cloudLayer, Light sunLight, Camera camera, bool shadowsEnabled)
         {
+#if UNITY_6000_4_OR_NEWER
+            EntityId cameraId = camera.GetEntityId();
+#else
             int cameraId = camera.GetInstanceID();
+#endif
             if (_preparedFrame != Time.frameCount || _preparedCameraId != cameraId)
             {
                 UpdateAnimation(cloudLayer);

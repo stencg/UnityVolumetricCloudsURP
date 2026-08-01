@@ -146,7 +146,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
                 // Perceptual Blending
             #if defined(_PERCEPTUAL_BLENDING)
-                half3 sceneColor = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s_point_clamp_sampler, screenUV, 0).rgb;
+                float3 sceneColor = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s_point_clamp_sampler, screenUV, 0).rgb;
                 cloudsColor.a = EvaluateFinalTransmittance(sceneColor.rgb, cloudsColor.a);
             #endif
 

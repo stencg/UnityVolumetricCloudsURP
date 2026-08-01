@@ -884,7 +884,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         }
 
         #region Non Render Graph Pass
-#if URP_COMPATIBILITY_MODE
+// Unity 6.4 removed the compatibility-mode ScriptableRenderPass callbacks and
+// target configuration APIs. Use the Render Graph implementation below there.
+#if URP_COMPATIBILITY_MODE && !UNITY_6000_4_OR_NEWER
         private Light GetMainLight(LightData lightData)
         {
             int shadowLightIndex = lightData.mainLightIndex;
@@ -1421,7 +1423,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         }
 
         #region Non Render Graph Pass
-#if URP_COMPATIBILITY_MODE
+// Unity 6.4 removed the compatibility-mode ScriptableRenderPass callbacks and
+// target configuration APIs. Use the Render Graph implementation below there.
+#if URP_COMPATIBILITY_MODE && !UNITY_6000_4_OR_NEWER
 #if UNITY_6000_0_OR_NEWER
         [Obsolete]
 #endif
@@ -1792,7 +1796,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         }
 
         #region Non Render Graph Pass
-#if URP_COMPATIBILITY_MODE
+// Unity 6.4 removed the compatibility-mode ScriptableRenderPass callbacks and
+// target configuration APIs. Use the Render Graph implementation below there.
+#if URP_COMPATIBILITY_MODE && !UNITY_6000_4_OR_NEWER
         private Light GetMainLight(LightData lightData)
         {
             int shadowLightIndex = lightData.mainLightIndex;

@@ -79,22 +79,23 @@ struct VolumetricRayResult
     bool invalidRay;
 };
 
-// Perceptual blending
-half EvaluateFinalTransmittance(half3 sceneColor, half transmittance)
+// Perceptual blending. Keep this math at full precision: physically based skies
+// can exceed the FP16 range around the sun before exposure is applied.
+float EvaluateFinalTransmittance(float3 sceneColor, float transmittance)
 {
     // Due to the high intensity of the sun, we often need apply the transmittance in a tonemapped space
     // As we only produce one transmittance, we evaluate the approximation on the luminance of the color
-    half luminance = Luminance(sceneColor * _PostExposure);
+    float luminance = Luminance(sceneColor * _PostExposure);
 
     if (luminance > 0.0)
     {
         // Apply the transmittance in tonemapped space
-        half resultLuminance = luminance * rcp(1.0 + luminance) * transmittance;
+        float resultLuminance = luminance * rcp(1.0 + luminance) * transmittance;
         resultLuminance = resultLuminance * rcp(1.0 - resultLuminance);
 
         // By softening the transmittance attenuation curve for pixels adjacent to cloud boundaries when the luminance is super high,  
         // We can prevent sun flicker and improve perceptual blending. (https://www.desmos.com/calculator/vmly6erwdo)
-        half finalTransmittance = max(resultLuminance * rcp(luminance), pow(transmittance, 6));
+        float finalTransmittance = max(resultLuminance * rcp(luminance), pow(transmittance, 6));
 
         // This approach only makes sense if the color is not black
         transmittance = lerp(transmittance, finalTransmittance, _ImprovedTransmittanceBlend);

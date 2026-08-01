@@ -16,7 +16,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 /// </summary>
 [DisallowMultipleRendererFeature("Volumetric Clouds URP")]
 [Tooltip("Add this Renderer Feature to support volumetric clouds in URP Volume.")]
-[HelpURL("https://github.com/jiaozi158/UnityVolumetricCloudsURP/tree/main")]
+[HelpURL("https://github.com/stencg/UnityVolumetricCloudsURP/tree/main")]
 public class VolumetricCloudsURP : ScriptableRendererFeature
 {
     [Header("Setup")]

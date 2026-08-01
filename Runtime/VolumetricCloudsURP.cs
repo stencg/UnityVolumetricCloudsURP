@@ -58,6 +58,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     private VolumetricCloudsPass volumetricCloudsPass;
     private VolumetricCloudsAmbientPass volumetricCloudsAmbientPass;
     private VolumetricCloudsShadowsPass volumetricCloudsShadowsPass;
+    private Material runtimeMaterial;
 
     // Pirnt message only once.
     private bool isLogPrinted = false;
@@ -217,27 +218,30 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
     public override void Create()
     {
-#if DEBUG
+        DisposeResources();
+
         // Check if the volumetric clouds material uses the correct shader.
-        if (material != null)
-        {
-            if (material.shader != Shader.Find(shaderName))
-            {
-#if UNITY_EDITOR || DEBUG
-                Debug.LogErrorFormat("Volumetric Clouds URP: Material shader is not {0}.", shaderName);
-#endif
-                return;
-            }
-        }
-        // No material applied.
-        else
+        if (material == null)
         {
 #if UNITY_EDITOR || DEBUG
             Debug.LogError("Volumetric Clouds URP: Material is empty.");
 #endif
             return;
         }
-#endif // DEBUG
+
+        if (material.shader != Shader.Find(shaderName))
+        {
+#if UNITY_EDITOR || DEBUG
+            Debug.LogErrorFormat("Volumetric Clouds URP: Material shader is not {0}.", shaderName);
+#endif
+            return;
+        }
+
+        runtimeMaterial = new Material(material)
+        {
+            name = $"{material.name} (Runtime)",
+            hideFlags = HideFlags.HideAndDontSave
+        };
 
         // Store the current enable state of volumetric clouds in a global shader keyword
         bool isDebugger = DebugManager.instance.isAnyDebugUIActive;
@@ -252,7 +256,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
         if (volumetricCloudsPass == null)
         {
-            volumetricCloudsPass = new(material, resolutionScale);
+            volumetricCloudsPass = new(runtimeMaterial, resolutionScale);
             volumetricCloudsPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents; // Use camera previous matrix to do reprojection
         }
         else
@@ -266,7 +270,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #if VC_AMBIENT
         if (volumetricCloudsAmbientPass == null)
         {
-            volumetricCloudsAmbientPass = new(material);
+            volumetricCloudsAmbientPass = new(runtimeMaterial);
             volumetricCloudsAmbientPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1;
         }
 #endif // VC_AMBIENT
@@ -274,7 +278,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #if VC_SHADOWS
         if (volumetricCloudsShadowsPass == null)
         {
-            volumetricCloudsShadowsPass = new(material);
+            volumetricCloudsShadowsPass = new(runtimeMaterial);
             volumetricCloudsShadowsPass.renderPassEvent = RenderPassEvent.BeforeRendering;
         }
 #endif // VC_SHADOWS
@@ -282,27 +286,36 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
     protected override void Dispose(bool disposing)
     {
+        DisposeResources();
+    }
+
+    private void DisposeResources()
+    {
         if (volumetricCloudsPass != null)
+        {
             volumetricCloudsPass.Dispose();
+            volumetricCloudsPass = null;
+        }
         if (volumetricCloudsAmbientPass != null)
+        {
             volumetricCloudsAmbientPass.Dispose();
+            volumetricCloudsAmbientPass = null;
+        }
 #if VC_SHADOWS
         if (volumetricCloudsShadowsPass != null)
+        {
             volumetricCloudsShadowsPass.Dispose();
+            volumetricCloudsShadowsPass = null;
+        }
 #endif // VC_SHADOWS
+        CoreUtils.Destroy(runtimeMaterial);
+        runtimeMaterial = null;
     }
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
-#if DEBUG
-        if (material == null)
-        {
-#if UNITY_EDITOR || DEBUG
-            Debug.LogErrorFormat("Volumetric Clouds URP: Material is empty.");
-#endif
+        if (runtimeMaterial == null || volumetricCloudsPass == null)
             return;
-        }
-#endif // DEBUG
 
 #if UNITY_EDITOR
         bool isEditingPrefab = UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage() != null;
@@ -1353,11 +1366,8 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             accumulateHandle?.Release();
             cameraTempDepthHandle?.Release();
 
-#if ZERO
-#if BUGFIX
             CoreUtils.Destroy(customLutPresetMap);
-#endif // BUGFIX
-#endif // ZERO
+            customLutPresetMap = null;
         }
         #endregion
     }

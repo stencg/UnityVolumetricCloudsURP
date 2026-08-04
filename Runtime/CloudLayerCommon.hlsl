@@ -42,7 +42,9 @@ float2 CloudLayerIntersectSphere(float sphereRadius, float cosChi, float radialD
 float2 CloudLayerGetLatLongCoords(float3 direction, bool upperHemisphereOnly)
 {
     const float2 inverseAtan = float2(0.1591, 0.3183);
-    float2 uv = float2(FastAtan2(direction.x, direction.z), FastASin(direction.y)) * inverseAtan + 0.5;
+    float2 uv = float2(
+        atan2(direction.x, direction.z),
+        asin(clamp(direction.y, -1.0, 1.0))) * inverseAtan + 0.5;
     uv.y = upperHemisphereOnly ? uv.y * 2.0 - 1.0 : uv.y;
     return uv;
 }

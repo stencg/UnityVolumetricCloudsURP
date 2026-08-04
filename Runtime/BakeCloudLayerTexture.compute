@@ -62,6 +62,8 @@ bool CloudLayerIntersectVolume(
     out float entryDistance,
     out float exitDistance)
 {
+    entryDistance = 0.0;
+    exitDistance = 0.0;
     float radialDistance = length(originPS);
     float cosChi = dot(originPS, direction) / radialDistance;
     float2 innerIntersection = CloudLayerIntersectSphere(lowerBoundPS, cosChi, radialDistance);
@@ -89,7 +91,9 @@ float CloudLayerExitVolume(float3 originPS, float3 direction, float upperBoundPS
 float2 CloudLayerGetLatLongCoords(float3 direction, bool upperHemisphereOnly)
 {
     const float2 inverseAtan = float2(0.1591, 0.3183);
-    float2 uv = float2(FastAtan2(direction.x, direction.z), FastASin(direction.y)) * inverseAtan + 0.5;
+    float2 uv = float2(
+        atan2(direction.x, direction.z),
+        asin(clamp(direction.y, -1.0, 1.0))) * inverseAtan + 0.5;
     uv.y = upperHemisphereOnly ? uv.y * 2.0 - 1.0 : uv.y;
     return uv;
 }
@@ -108,7 +112,7 @@ float3 CloudLayerInverseLatLong(float2 uv, bool upperHemisphereOnly)
     uv = (uv - 0.5) / inverseAtan;
 
     float y = sin(uv.y);
-    float scale = sqrt(1.0 - y * y);
+    float scale = sqrt(saturate(1.0 - y * y));
     return float3(sin(uv.x) * scale, y, cos(uv.x) * scale);
 }
 

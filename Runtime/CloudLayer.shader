@@ -8,7 +8,7 @@ Shader "Hidden/Sky/CloudLayerURP"
         {
             Name "Cloud Layer"
             ZWrite Off
-            ZTest LEqual
+            ZTest Always
             Blend One OneMinusSrcAlpha
             Cull Off
 
@@ -20,7 +20,13 @@ Shader "Hidden/Sky/CloudLayerURP"
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
             #include "Packages/com.jiaozi158.unity-volumetric-clouds-urp/Runtime/CloudLayerCommon.hlsl"
+
+            float3 _CloudLayerViewRayBottomLeft;
+            float3 _CloudLayerViewRayTopLeft;
+            float3 _CloudLayerViewRayTopRight;
+            float3 _CloudLayerViewRayBottomRight;
 
             struct Attributes
             {
@@ -49,8 +55,17 @@ Shader "Hidden/Sky/CloudLayerURP"
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 float2 uv = UnityStereoTransformScreenSpaceTex(input.uv);
+                float rawDepth = SampleSceneDepth(uv);
+                clip(Linear01Depth(rawDepth, _ZBufferParams) - 0.9999);
+
+#if defined(UNITY_SINGLE_PASS_STEREO)
                 float3 positionWS = ComputeWorldSpacePosition(uv, UNITY_RAW_FAR_CLIP_VALUE, UNITY_MATRIX_I_VP);
                 float3 directionWS = normalize(positionWS - _WorldSpaceCameraPos);
+#else
+                float3 bottomRay = lerp(_CloudLayerViewRayBottomLeft, _CloudLayerViewRayBottomRight, uv.x);
+                float3 topRay = lerp(_CloudLayerViewRayTopLeft, _CloudLayerViewRayTopRight, uv.x);
+                float3 directionWS = normalize(lerp(bottomRay, topRay, uv.y));
+#endif
                 return CloudLayerRender(directionWS);
             }
             ENDHLSL

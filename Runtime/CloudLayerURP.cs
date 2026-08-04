@@ -61,6 +61,10 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         internal static readonly int ShBg = Shader.PropertyToID("_CloudLayerSHBg");
         internal static readonly int ShBb = Shader.PropertyToID("_CloudLayerSHBb");
         internal static readonly int ShC = Shader.PropertyToID("_CloudLayerSHC");
+        internal static readonly int ViewRayBottomLeft = Shader.PropertyToID("_CloudLayerViewRayBottomLeft");
+        internal static readonly int ViewRayTopLeft = Shader.PropertyToID("_CloudLayerViewRayTopLeft");
+        internal static readonly int ViewRayTopRight = Shader.PropertyToID("_CloudLayerViewRayTopRight");
+        internal static readonly int ViewRayBottomRight = Shader.PropertyToID("_CloudLayerViewRayBottomRight");
         internal static readonly int MainLightCookieTexture = Shader.PropertyToID("_MainLightCookieTexture");
         internal static readonly int MainLightWorldToLight = Shader.PropertyToID("_MainLightWorldToLight");
         internal static readonly int MainLightCookieTextureFormat = Shader.PropertyToID("_MainLightCookieTextureFormat");
@@ -650,6 +654,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     {
         private static readonly ProfilingSampler RenderSampler = new("Render Cloud Layer");
         private static readonly MaterialPropertyBlock PropertyBlock = new();
+        private static readonly Vector3[] FrustumCorners = new Vector3[4];
 
         private readonly Material _material;
         private readonly CloudLayerResources _resources;
@@ -660,6 +665,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         {
             _material = material;
             _resources = resources;
+            ConfigureInput(ScriptableRenderPassInput.Depth);
         }
 
         internal void Setup(CloudLayer cloudLayer, bool shadowsEnabled)
@@ -723,14 +729,23 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
                     0.0f);
                 passData.sunDirection = sunLight != null ? -sunLight.transform.forward : Vector3.zero;
                 passData.planetRadius = _cloudLayer.planetRadius.value;
+                Camera camera = cameraData.camera;
+                camera.CalculateFrustumCorners(
+                    new Rect(0.0f, 0.0f, 1.0f, 1.0f),
+                    camera.farClipPlane,
+                    Camera.MonoOrStereoscopicEye.Mono,
+                    FrustumCorners);
+                passData.viewRayBottomLeft = camera.transform.TransformVector(FrustumCorners[0]);
+                passData.viewRayTopLeft = camera.transform.TransformVector(FrustumCorners[1]);
+                passData.viewRayTopRight = camera.transform.TransformVector(FrustumCorners[2]);
+                passData.viewRayBottomRight = camera.transform.TransformVector(FrustumCorners[3]);
                 SetAmbientProbe(ref passData);
 
                 builder.UseTexture(passData.cloudTextureHandle, AccessFlags.Read);
                 builder.UseTexture(passData.flowmapAHandle, AccessFlags.Read);
                 builder.UseTexture(passData.flowmapBHandle, AccessFlags.Read);
+                builder.UseTexture(resourceData.cameraDepthTexture, AccessFlags.Read);
                 builder.SetRenderAttachment(resourceData.activeColorTexture, 0, AccessFlags.Write);
-                if (resourceData.activeDepthTexture.IsValid())
-                    builder.SetRenderAttachmentDepth(resourceData.activeDepthTexture, AccessFlags.Read);
 
                 builder.SetRenderFunc(static (RenderPassData data, RasterGraphContext context) =>
                 {
@@ -754,6 +769,10 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
                     PropertyBlock.SetVector(ShaderIds.ShBg, data.shBg);
                     PropertyBlock.SetVector(ShaderIds.ShBb, data.shBb);
                     PropertyBlock.SetVector(ShaderIds.ShC, data.shC);
+                    PropertyBlock.SetVector(ShaderIds.ViewRayBottomLeft, data.viewRayBottomLeft);
+                    PropertyBlock.SetVector(ShaderIds.ViewRayTopLeft, data.viewRayTopLeft);
+                    PropertyBlock.SetVector(ShaderIds.ViewRayTopRight, data.viewRayTopRight);
+                    PropertyBlock.SetVector(ShaderIds.ViewRayBottomRight, data.viewRayBottomRight);
                     context.cmd.DrawProcedural(
                         Matrix4x4.identity,
                         data.material,
@@ -803,6 +822,10 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             internal Vector4 shBg;
             internal Vector4 shBb;
             internal Vector4 shC;
+            internal Vector3 viewRayBottomLeft;
+            internal Vector3 viewRayTopLeft;
+            internal Vector3 viewRayTopRight;
+            internal Vector3 viewRayBottomRight;
         }
     }
 }

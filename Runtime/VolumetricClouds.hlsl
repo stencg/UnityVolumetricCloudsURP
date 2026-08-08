@@ -4,7 +4,7 @@
 #include "./VolumetricCloudsDefs.hlsl"
 #include "./VolumetricCloudsUtilities.hlsl"
 
-CloudRay BuildCloudsRay(float2 screenUV, float depth, half3 invViewDirWS, bool isOccluded)
+CloudRay BuildCloudsRay(float2 screenUV, float depth, float3 invViewDirWS, bool isOccluded)
 {
     CloudRay ray;
 
@@ -73,8 +73,9 @@ VolumetricRayResult TraceVolumetricRay(CloudRay cloudRay)
             // Normalization value of the depth
             float meanDistanceDivider = 0.0;
 
-            // Current position for the evaluation, apply blue noise to start position
-            float currentDistance = cloudRay.integrationNoise;
+            // Offset the first sample by a random fraction of one ray-march step.
+            // integrationNoise is dimensionless, while currentDistance is in world units.
+            float currentDistance = cloudRay.integrationNoise * stepS;
             float3 currentPositionWS = cloudRay.originWS + (rayMarchRange.start + currentDistance) * cloudRay.direction;
 
             // Initialize the values for the optimized ray marching
@@ -138,10 +139,9 @@ VolumetricRayResult TraceVolumetricRay(CloudRay cloudRay)
                     if (sequentialEmptySamples == EMPTY_STEPS_BEFORE_LARGE_STEPS)
                         activeSampling = false;
 
-                    // Do the next step
-                    float relativeStepSize = lerp(cloudRay.integrationNoise, 1.0, saturate(currentIndex));
-                    currentPositionWS += cloudRay.direction * (stepS * relativeStepSize);
-                    currentDistance += stepS * relativeStepSize;
+                    // Keep the randomized offset while advancing at a uniform interval.
+                    currentPositionWS += cloudRay.direction * stepS;
+                    currentDistance += stepS;
 
                 }
                 else

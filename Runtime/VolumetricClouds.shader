@@ -132,7 +132,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
                 // Calculate the virtual position of skybox for view direction calculation
                 float3 positionWS = ComputeWorldSpacePosition(screenUV, UNITY_RAW_FAR_CLIP_VALUE, UNITY_MATRIX_I_VP);
-                half3 invViewDirWS = normalize(positionWS - GetCameraPositionWS());
+                float3 invViewDirWS = normalize(positionWS - GetCameraPositionWS());
 
                 CloudRay cloudRay = BuildCloudsRay(screenUV, depth, invViewDirWS, isOccluded);
 
@@ -726,7 +726,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
                 half4 cloudsColor = half4(0.0, 0.0, 0.0, 1.0);
 
-                half3 invViewDirWS = normalize(input.positionWS - GetCameraPositionWS());
+                float3 invViewDirWS = normalize(input.positionWS - GetCameraPositionWS());
                 
 #ifdef _LOCAL_VOLUMETRIC_CLOUDS
                 CloudRay cloudRay;

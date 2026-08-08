@@ -56,7 +56,9 @@ struct CloudRay
     // Origin of the ray in camera-relative space
     float3 originWS;
     // Direction of the ray in world space
-    half3 direction;
+    // Full precision prevents adjacent long-distance rays from collapsing to
+    // the same direction on Vulkan targets that honor relaxed half precision.
+    float3 direction;
     // Maximal ray length before hitting the far plane or an occluder
     float maxRayLength;
     // Integration Noise
@@ -226,7 +228,7 @@ int RaySphereIntersection(float3 startWS, float3 dir, float radius, out float2 r
 
 // Returns true if the ray exits the cloud volume (doesn't intersect earth)
 // The ray is supposed to start inside the volume
-bool ExitCloudVolume(float3 originPS, half3 dir, float higherBoundPS, out float tExit)
+bool ExitCloudVolume(float3 originPS, float3 dir, float higherBoundPS, out float tExit)
 {
     // Given that we are inside the volume, we are guaranteed to exit at the outer bound
     float radialDistance = length(originPS);
@@ -247,7 +249,7 @@ struct RayMarchRange
 
 // Returns true if the ray intersects the cloud volume
 // Outputs the entry and exit distance from the volume
-bool IntersectCloudVolume(float3 originPS, half3 dir, float lowerBoundPS, float higherBoundPS, out float tEntry, out float tExit)
+bool IntersectCloudVolume(float3 originPS, float3 dir, float lowerBoundPS, float higherBoundPS, out float tEntry, out float tExit)
 {
     bool intersect;
     float radialDistance = length(originPS);
@@ -277,7 +279,7 @@ bool IntersectCloudVolume(float3 originPS, half3 dir, float lowerBoundPS, float 
     return intersect;
 }
 
-bool GetCloudVolumeIntersection(float3 originWS, half3 dir, out RayMarchRange rayMarchRange)
+bool GetCloudVolumeIntersection(float3 originWS, float3 dir, out RayMarchRange rayMarchRange)
 {
 #ifdef _LOCAL_VOLUMETRIC_CLOUDS
     return IntersectCloudVolume(ConvertToPS(originWS), dir, _LowestCloudAltitude, _HighestCloudAltitude, rayMarchRange.start, rayMarchRange.end);

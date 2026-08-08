@@ -422,6 +422,8 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     {
         private const string rasterPassProfilerTag = "Trace Volumetric Clouds";
         private const string profilerTag = "Volumetric Clouds";
+        private const int combinePass = 1;
+        private const int physicallyBasedSkyCombinePass = 7;
         private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(profilerTag);
 
         public VolumetricClouds cloudsVolume;
@@ -450,6 +452,15 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private readonly Material cloudsMaterial;
 
         private readonly bool fastCopy = (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) != 0;
+
+        private static int GetCombinePass(Material material, bool hasAtmosphericScattering)
+        {
+            // PackageRequirements passes can be omitted from the runtime shader on some
+            // graphics APIs. Never submit the optional PBSky pass unless it is present.
+            return hasAtmosphericScattering && material.passCount > physicallyBasedSkyCombinePass
+                ? physicallyBasedSkyCombinePass
+                : combinePass;
+        }
 
         private static readonly int numPrimarySteps = Shader.PropertyToID("_NumPrimarySteps");
         private static readonly int numLightSteps = Shader.PropertyToID("_NumLightSteps");
@@ -996,7 +1007,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 Blitter.BlitTexture(cmd, cameraColorHandle, m_ScaleBias, cloudsMaterial, pass: 0);
 
                 // Clouds Upscale & Combine
-                Blitter.BlitCameraTexture(cmd, cameraColorHandle, cameraColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, cloudsMaterial, pass: hasAtmosphericScattering ? 7 : 1);
+                Blitter.BlitCameraTexture(cmd, cameraColorHandle, cameraColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, cloudsMaterial, pass: GetCombinePass(cloudsMaterial, hasAtmosphericScattering));
 
                 if (outputToSceneDepth)
                 {
@@ -1100,7 +1111,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
 
             // Clouds Upscale & Combine
-            Blitter.BlitCameraTexture(cmd, data.cloudsColorHandle, data.cameraColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, data.cloudsMaterial, pass: data.hasAtmosphericScattering ? 7 : 1);
+            Blitter.BlitCameraTexture(cmd, data.cloudsColorHandle, data.cameraColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, data.cloudsMaterial, pass: GetCombinePass(data.cloudsMaterial, data.hasAtmosphericScattering));
 
 #if VC_DEPTH
             if (data.outputToSceneDepth)

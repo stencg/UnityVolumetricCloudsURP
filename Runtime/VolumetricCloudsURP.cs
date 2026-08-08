@@ -630,7 +630,8 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #if URP_PBSKY
             float4 planetCenterRad = visualEnvVolume.GetPlanetCenterRadius(cameraPosition);
             float actualEarthRad = isVolumeActive ? planetCenterRad.w : Mathf.Lerp(1.0f, 0.025f, cloudsVolume.earthCurvature.value) * earthRad;
-            planetCenterRad = visualEnvVolume.renderingSpace.value == VisualEnvironment.RenderingSpace.World ? planetCenterRad : float4(0.0f, -actualEarthRad, 0.0f, actualEarthRad);
+            bool useVisualEnvironmentPlanet = isVolumeActive && visualEnvVolume.renderingSpace.value == VisualEnvironment.RenderingSpace.World;
+            planetCenterRad = useVisualEnvironmentPlanet ? planetCenterRad : float4(0.0f, -actualEarthRad, 0.0f, actualEarthRad);
 
             cloudsMaterial.SetVector(planetCenterRadius, planetCenterRad);
 #else

@@ -105,8 +105,8 @@ class VolumetricCloudsEditor : VolumeComponentEditor
     const string k_RendererFeatureOffMessage = "\"Volumetric Clouds\" is disabled in the active URP renderer.";
     const string k_RenderingDebuggerMessage = "\"Volumetric Clouds\" is disabled to avoid affecting rendering debugging.";
 
-    const string k_LocalCloudsMessage = "The \"Local Clouds\" property is not available, please adjust the \"Rendering Space\" in \"Visual Environment\" override instead.";
-    const string k_EarthCurvatureMessage = "The \"Earth Curvature\" property is not available, please adjust the \"Planet Radius\" in \"Visual Environment\" override instead.";
+    const string k_LocalCloudsMessage = "\"Local Clouds\" is controlled by \"Rendering Space\" in the \"Visual Environment\" override while a sky is selected.";
+    const string k_EarthCurvatureMessage = "\"Earth Curvature\" is controlled by \"Planet Radius\" in the \"Visual Environment\" override while a sky is selected.";
 
     const string k_CustomSkyShaderGraphMessage = "It looks like the \"Sky Material\" is using a shader graph. Please ensure that the \"Render Face\" setting is set to \"Both\".";
 

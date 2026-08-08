@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -448,6 +449,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private RTHandle accumulateHandle;
         private RTHandle historyHandle;
         private RTHandle cameraTempDepthHandle;
+#if UNITY_6000_0_OR_NEWER
+        private readonly Dictionary<Camera, RTHandle> renderGraphHistoryHandles = new();
+#endif
 
         private readonly Material cloudsMaterial;
 
@@ -1076,6 +1080,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
             internal bool canCopy;
             internal bool denoiseClouds;
+            internal bool historyValid;
             internal bool dynamicAmbientProbe;
             internal bool outputDepth;
             internal bool outputToSceneDepth;
@@ -1127,19 +1132,21 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #if VC_DENOISE
             if (data.denoiseClouds)
             {
-                // Prepare Temporal Reprojection (copy source buffer: colorHandle.rgb + cloudsHandle.a)
-                Blitter.BlitCameraTexture(cmd, data.cameraColorHandle, data.accumulateHandle, data.cloudsMaterial, pass: 2);
+                if (data.historyValid)
+                {
+                    // Prepare Temporal Reprojection (copy source buffer: colorHandle.rgb + cloudsHandle.a)
+                    Blitter.BlitCameraTexture(cmd, data.cameraColorHandle, data.accumulateHandle, data.cloudsMaterial, pass: 2);
 
-                // Temporal Reprojection
-                Blitter.BlitCameraTexture(cmd, data.accumulateHandle, data.cameraColorHandle, data.cloudsMaterial, pass: 3);
+                    // Bind persistent history before recording the temporal reprojection draw.
+                    data.cloudsMaterial.SetTexture(volumetricCloudsHistoryTexture, data.historyHandle);
+                    Blitter.BlitCameraTexture(cmd, data.accumulateHandle, data.cameraColorHandle, data.cloudsMaterial, pass: 3);
+                }
 
-                // Update history texture for temporal reprojection
+                // Initialize or update persistent history for the next frame.
                 if (data.canCopy)
                     cmd.CopyTexture(data.cameraColorHandle, data.historyHandle);
                 else
                     Blitter.BlitCameraTexture(cmd, data.cameraColorHandle, data.historyHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, data.cloudsMaterial, pass: 2);
-
-                data.cloudsMaterial.SetTexture(volumetricCloudsHistoryTexture, data.historyHandle);
             }
 #endif // VC_DENOISE
 
@@ -1335,10 +1342,13 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #if VC_DENOISE
                 if (passData.denoiseClouds)
                 {
-                    TextureHandle accumulateHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, name: _VolumetricCloudsAccumulationTexture, false, FilterMode.Point, TextureWrapMode.Clamp);
-                    TextureHandle historyHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, name: _VolumetricCloudsHistoryTexture, false, FilterMode.Point, TextureWrapMode.Clamp);
-                    passData.accumulateHandle = accumulateHandle;
-                    passData.historyHandle = historyHandle;
+                    Camera camera = cameraData.camera;
+                    renderGraphHistoryHandles.TryGetValue(camera, out RTHandle cameraHistoryHandle);
+                    bool historyReallocated = RenderingUtils.ReAllocateHandleIfNeeded(ref cameraHistoryHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _VolumetricCloudsHistoryTexture);
+                    renderGraphHistoryHandles[camera] = cameraHistoryHandle;
+                    passData.historyValid = !historyReallocated;
+                    passData.accumulateHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, name: _VolumetricCloudsAccumulationTexture, false, FilterMode.Point, TextureWrapMode.Clamp);
+                    passData.historyHandle = renderGraph.ImportTexture(cameraHistoryHandle);
                 }
 #endif // VC_DENOISE
 
@@ -1378,6 +1388,11 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             historyHandle?.Release();
             accumulateHandle?.Release();
             cameraTempDepthHandle?.Release();
+#if UNITY_6000_0_OR_NEWER
+            foreach (RTHandle cameraHistoryHandle in renderGraphHistoryHandles.Values)
+                cameraHistoryHandle?.Release();
+            renderGraphHistoryHandles.Clear();
+#endif
 
             CoreUtils.Destroy(customLutPresetMap);
             customLutPresetMap = null;

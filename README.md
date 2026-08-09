@@ -21,7 +21,7 @@ Local Volumetric Clouds:
  
  ![LocalVolumetricClouds2](./Documentation~/Images/Showcases/LocalClouds2.jpg)
  
-[Physically Based Sky](https://github.com/jiaozi158/UnityPhysicallyBasedSkyURP):
+[Physically Based Sky](https://github.com/stencg/UnityPhysicallyBasedSkyURP):
  
  ![PhysicallyBasedSkyURP](./Documentation~/Images/Showcases/PhysicallyBasedSky.jpg)
  
@@ -47,7 +47,7 @@ Reminders
 - Some settings are still WIP, such as **Custom Cloud Map** overrides.
 - Orthographic camera is not supported.
 - To render volumetric clouds shadows, it will override the cookie in the main directional light.
-- To customize the **planet radius and center** for volumetric clouds, install [Physically Based Sky](https://github.com/jiaozi158/UnityPhysicallyBasedSkyURP) via the package manager.
+- To customize the **planet radius and center** for volumetric clouds, install [Physically Based Sky](https://github.com/stencg/UnityPhysicallyBasedSkyURP) via the package manager.
  
 Scripting Define Symbols
 ------------
@@ -87,8 +87,6 @@ normally do **not** add them yourself.
 
 - **Unity 6 (Render Graph):** `ZERO` (minimum). Add `VC_SHADOWS`, `VC_DENOISE`, `VC_DEPTH`,
   `VC_AMBIENT` and `OPTIMISATION` as needed.
-- **Unity 2022 / URP 14 (compatibility mode):** `URP_COMPATIBILITY_MODE` is set automatically;
-  keep `ZERO` set as well and add the optional feature defines you want.
 
 License
 ------------

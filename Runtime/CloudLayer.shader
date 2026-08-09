@@ -18,6 +18,7 @@ Shader "Hidden/Sky/CloudLayerURP"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma multi_compile_instancing
+            #pragma multi_compile_local_fragment _ _PHYSICALLY_BASED_SUN
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"

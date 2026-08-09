@@ -3,6 +3,7 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SphericalHarmonics.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
 
 TEXTURE2D_ARRAY(_CloudTexture);
 SAMPLER(sampler_CloudTexture);
@@ -29,6 +30,70 @@ float4 _CloudLayerSHBb;
 float4 _CloudLayerSHC;
 float3 _SunDirection;
 float _PlanetaryRadius;
+
+#ifdef _PHYSICALLY_BASED_SUN
+float CloudLayerComputeCosineOfHorizonAngle(float radialDistance)
+{
+    float sinHorizon = _PlanetaryRadius / radialDistance;
+    return -sqrt(saturate(1.0 - sinHorizon * sinHorizon));
+}
+
+float CloudLayerChapmanUpperApprox(float z, float cosTheta)
+{
+    float cosineSquared = cosTheta * cosTheta;
+    float numerator = 0.761643 * ((1.0 + 2.0 * z) - cosineSquared * z);
+    float denominator = cosTheta * z + sqrt(z * (1.47721 + 0.273828 * cosineSquared * z));
+    return 0.5 * cosTheta + numerator / denominator;
+}
+
+float CloudLayerChapmanHorizontal(float z)
+{
+    float inverseSqrtZ = rsqrt(z);
+    return 0.626657 * (inverseSqrtZ + 2.0 * z * inverseSqrtZ);
+}
+
+float3 CloudLayerComputeAtmosphericOpticalDepth(float radialDistance, float cosTheta)
+{
+    const float2 scaleHeight = float2(8000.0, 1200.0);
+    const float2 densityFalloff = rcp(scaleHeight);
+    float2 z = densityFalloff * radialDistance;
+    float2 planetZ = densityFalloff * _PlanetaryRadius;
+    float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
+    float2 chapman;
+    chapman.x = CloudLayerChapmanUpperApprox(z.x, abs(cosTheta)) * exp(planetZ.x - z.x);
+    chapman.y = CloudLayerChapmanUpperApprox(z.y, abs(cosTheta)) * exp(planetZ.y - z.y);
+
+    if (cosTheta < 0.0)
+    {
+        float2 horizonZ = z * sinTheta;
+        float2 horizontalChapman;
+        horizontalChapman.x = 2.0 * CloudLayerChapmanHorizontal(horizonZ.x);
+        horizontalChapman.y = 2.0 * CloudLayerChapmanHorizontal(horizonZ.y);
+        chapman = horizontalChapman * exp(planetZ - horizonZ) - chapman;
+    }
+
+    float2 opticalDepth = chapman * scaleHeight;
+    const float3 airSeaLevelExtinction = float3(5.8, 13.5, 33.1) / 1000000.0;
+    const float aerosolSeaLevelExtinction = 0.00001;
+    return opticalDepth.x * airSeaLevelExtinction + opticalDepth.y * aerosolSeaLevelExtinction;
+}
+
+float3 CloudLayerEvaluateSunColorAttenuation(float3 positionPS, float3 sunDirection)
+{
+    float radialDistance = length(positionPS);
+    float cosTheta = dot(positionPS, sunDirection) / radialDistance;
+    radialDistance = max(radialDistance, _PlanetaryRadius);
+    float cosHorizon = CloudLayerComputeCosineOfHorizonAngle(radialDistance);
+
+    if (cosTheta < cosHorizon)
+        return 0.0;
+
+    float3 attenuation = TransmittanceFromOpticalDepth(
+        CloudLayerComputeAtmosphericOpticalDepth(radialDistance, cosTheta));
+    float penumbra = saturate((cosTheta - cosHorizon) / 0.0019);
+    return attenuation * penumbra;
+}
+#endif
 
 float2 CloudLayerIntersectSphere(float sphereRadius, float cosChi, float radialDistance)
 {
@@ -131,8 +196,13 @@ float4 CloudLayerRenderSingle(float3 direction, int layerIndex)
         cloud = CloudLayerSampleMap(direction, layerIndex);
     }
 
+    float3 directLighting = cloud.x * layerParameters.xyz;
+#ifdef _PHYSICALLY_BASED_SUN
+    float3 positionPS = position + float3(0.0, _PlanetaryRadius, 0.0);
+    directLighting *= CloudLayerEvaluateSunColorAttenuation(positionPS, _SunDirection);
+#endif
     float3 ambient = max(CloudLayerEvaluateAmbient(float3(0.0, -1.0, 0.0)), 0.0) * ambientDimmer;
-    return float4(cloud.x * layerParameters.xyz + ambient * cloud.y, cloud.y) * _FlowmapParamB.w;
+    return float4(directLighting + ambient * cloud.y, cloud.y) * _FlowmapParamB.w;
 }
 
 float4 CloudLayerRender(float3 direction)

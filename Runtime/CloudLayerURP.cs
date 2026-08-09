@@ -22,6 +22,10 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     [SerializeField] private bool _renderingDebugger;
     [SerializeField] private bool _reflectionProbe;
 
+    [Header("Lighting")]
+    [Tooltip("Specifies if URP calculates physically based sun attenuation for cloud layers.")]
+    [SerializeField] private bool _sunAttenuation;
+
     private Material _material;
     private CloudLayerResources _resources;
     private CloudLayerRenderPass _renderPass;
@@ -156,7 +160,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             _unsupportedCookiesLogged = true;
         }
 
-        _renderPass.Setup(cloudLayer, cloudLayer.CastShadows && supportsCookies);
+        _renderPass.Setup(cloudLayer, cloudLayer.CastShadows && supportsCookies, _sunAttenuation);
         renderer.EnqueuePass(_renderPass);
     }
 
@@ -668,10 +672,11 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             ConfigureInput(ScriptableRenderPassInput.Depth);
         }
 
-        internal void Setup(CloudLayer cloudLayer, bool shadowsEnabled)
+        internal void Setup(CloudLayer cloudLayer, bool shadowsEnabled, bool sunAttenuation)
         {
             _cloudLayer = cloudLayer;
             _shadowsEnabled = shadowsEnabled;
+            CoreUtils.SetKeyword(_material, "_PHYSICALLY_BASED_SUN", sunAttenuation);
         }
 
         /// <summary>

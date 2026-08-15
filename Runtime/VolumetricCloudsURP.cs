@@ -60,6 +60,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     private VolumetricCloudsAmbientPass volumetricCloudsAmbientPass;
     private VolumetricCloudsShadowsPass volumetricCloudsShadowsPass;
     private Material runtimeMaterial;
+#if URP_PBSKY
+    private bool staticPbrSkyAmbientProbeInitialized;
+    private string staticPbrSkyAmbientProbeScenePath;
+#endif
 
     // Pirnt message only once.
     private bool isLogPrinted = false;
@@ -220,6 +224,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     public override void Create()
     {
         DisposeResources();
+#if URP_PBSKY
+        staticPbrSkyAmbientProbeInitialized = false;
+        staticPbrSkyAmbientProbeScenePath = null;
+#endif
 
         // Check if the volumetric clouds material uses the correct shader.
         if (material == null)
@@ -347,8 +355,29 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             // Check if the ambient probe is already updating dynamically.
             bool isDynamicPbrSky = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyAmbientMode.value == VisualEnvironment.SkyAmbientMode.Dynamic && Shader.IsKeywordEnabled(VISUAL_ENVIRONMENT_DYNAMIC_SKY);
             bool dynamicAmbientProbe = !isDynamicPbrSky && ambientProbe == CloudsAmbientMode.Dynamic;
+            bool isStaticPbrSky = visualEnvironment != null && visualEnvironment.IsActive()
+                && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased
+                && visualEnvironment.skyAmbientMode.value == VisualEnvironment.SkyAmbientMode.Static;
+            bool useCachedPbrSkyAmbientProbe = isStaticPbrSky && ambientProbe == CloudsAmbientMode.Static;
+
+            if (useCachedPbrSkyAmbientProbe && renderingData.cameraData.cameraType == CameraType.Game)
+            {
+                string scenePath = renderingData.cameraData.camera.gameObject.scene.path;
+                if (staticPbrSkyAmbientProbeScenePath != scenePath)
+                {
+                    staticPbrSkyAmbientProbeInitialized = false;
+                    staticPbrSkyAmbientProbeScenePath = scenePath;
+                }
+            }
+
+            bool updateAmbientProbe = dynamicAmbientProbe || useCachedPbrSkyAmbientProbe && !staticPbrSkyAmbientProbeInitialized;
+            dynamicAmbientProbe |= useCachedPbrSkyAmbientProbe;
+
+            if (!useCachedPbrSkyAmbientProbe)
+                staticPbrSkyAmbientProbeInitialized = false;
         #else
             bool dynamicAmbientProbe = ambientProbe == CloudsAmbientMode.Dynamic;
+            bool updateAmbientProbe = dynamicAmbientProbe;
         #endif
             volumetricCloudsPass.cloudsVolume = cloudsVolume;
             volumetricCloudsPass.colorAdjustments = colorAdjustments;
@@ -400,7 +429,13 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
 #if VC_AMBIENT
             // No need to render dynamic ambient probe for reflection probes.
-            if (dynamicAmbientProbe && !isProbeCamera) { renderer.EnqueuePass(volumetricCloudsAmbientPass); }
+            if (updateAmbientProbe && !isProbeCamera)
+            {
+                renderer.EnqueuePass(volumetricCloudsAmbientPass);
+            #if URP_PBSKY
+                staticPbrSkyAmbientProbeInitialized |= useCachedPbrSkyAmbientProbe;
+            #endif
+            }
 #endif // VC_AMBIENT
 
             isLogPrinted = false;

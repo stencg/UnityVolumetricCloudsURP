@@ -38,7 +38,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
     [Header("Lighting")]
     [Tooltip("Specifies the volumetric clouds ambient probe update frequency.")]
-    [SerializeField] private CloudsAmbientMode ambientProbe = CloudsAmbientMode.Dynamic;
+    [SerializeField] private CloudsAmbientMode ambientProbe = CloudsAmbientMode.Static;
     [Tooltip("Specifies if URP calculates physically based sun attenuation for volumetric clouds.")]
     [SerializeField] private bool sunAttenuation = false;
 
@@ -61,7 +61,6 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     private VolumetricCloudsShadowsPass volumetricCloudsShadowsPass;
     private Material runtimeMaterial;
 #if URP_PBSKY
-    private bool staticPbrSkyAmbientProbeInitialized;
     private string staticPbrSkyAmbientProbeScenePath;
 #endif
 
@@ -225,7 +224,6 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     {
         DisposeResources();
 #if URP_PBSKY
-        staticPbrSkyAmbientProbeInitialized = false;
         staticPbrSkyAmbientProbeScenePath = null;
 #endif
 
@@ -275,14 +273,6 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             volumetricCloudsPass.upscaleMode = upscaleMode;
             volumetricCloudsPass.dynamicAmbientProbe = ambientProbe == CloudsAmbientMode.Dynamic;
         }
-
-#if VC_AMBIENT
-        if (volumetricCloudsAmbientPass == null)
-        {
-            volumetricCloudsAmbientPass = new(runtimeMaterial);
-            volumetricCloudsAmbientPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1;
-        }
-#endif // VC_AMBIENT
 
 #if VC_SHADOWS
         if (volumetricCloudsShadowsPass == null)
@@ -351,6 +341,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         {
         #if URP_PBSKY
             VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
+            PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
 
             // Check if the ambient probe is already updating dynamically.
             bool isDynamicPbrSky = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyAmbientMode.value == VisualEnvironment.SkyAmbientMode.Dynamic && Shader.IsKeywordEnabled(VISUAL_ENVIRONMENT_DYNAMIC_SKY);
@@ -365,16 +356,15 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 string scenePath = renderingData.cameraData.camera.gameObject.scene.path;
                 if (staticPbrSkyAmbientProbeScenePath != scenePath)
                 {
-                    staticPbrSkyAmbientProbeInitialized = false;
+                    volumetricCloudsPass.ResetStaticPbrSkyAmbientProbe();
                     staticPbrSkyAmbientProbeScenePath = scenePath;
                 }
             }
 
-            bool updateAmbientProbe = dynamicAmbientProbe || useCachedPbrSkyAmbientProbe && !staticPbrSkyAmbientProbeInitialized;
-            dynamicAmbientProbe |= useCachedPbrSkyAmbientProbe;
-
             if (!useCachedPbrSkyAmbientProbe)
-                staticPbrSkyAmbientProbeInitialized = false;
+                volumetricCloudsPass.ResetStaticPbrSkyAmbientProbe();
+
+            bool updateAmbientProbe = dynamicAmbientProbe;
         #else
             bool dynamicAmbientProbe = ambientProbe == CloudsAmbientMode.Dynamic;
             bool updateAmbientProbe = dynamicAmbientProbe;
@@ -387,13 +377,16 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             volumetricCloudsPass.outputDepth = depthTexture || outputDepth; // Implicitly enable clouds depth when we need to output to scene depth
             volumetricCloudsPass.outputToSceneDepth = depthTexture;
             volumetricCloudsPass.sunAttenuation = sunAttenuation;
+        #if URP_PBSKY
+            volumetricCloudsPass.pbrSky = pbrSky;
+            volumetricCloudsPass.useCachedPbrSkyAmbientProbe = useCachedPbrSkyAmbientProbe;
+        #endif
 
 #if VC_SHADOWS
             volumetricCloudsShadowsPass.cloudsVolume = cloudsVolume;
 #endif // VC_SHADOWS
 
 #if URP_PBSKY
-            PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
             Fog fog = stack.GetComponent<Fog>();
             volumetricCloudsPass.hasAtmosphericScattering = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased && pbrSky != null && pbrSky.IsActive() && pbrSky.atmosphericScattering.value;
             volumetricCloudsPass.hasAtmosphericScattering |= fog != null && fog.IsActive();
@@ -431,10 +424,13 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             // No need to render dynamic ambient probe for reflection probes.
             if (updateAmbientProbe && !isProbeCamera)
             {
+                if (volumetricCloudsAmbientPass == null)
+                {
+                    volumetricCloudsAmbientPass = new(runtimeMaterial);
+                    volumetricCloudsAmbientPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1;
+                }
+
                 renderer.EnqueuePass(volumetricCloudsAmbientPass);
-            #if URP_PBSKY
-                staticPbrSkyAmbientProbeInitialized |= useCachedPbrSkyAmbientProbe;
-            #endif
             }
 #endif // VC_AMBIENT
 
@@ -466,6 +462,11 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         public ColorAdjustments colorAdjustments;
     #if URP_PBSKY
         public VisualEnvironment visualEnvVolume;
+        public PhysicallyBasedSky pbrSky;
+        public bool useCachedPbrSkyAmbientProbe;
+
+        private bool staticPbrSkyAmbientProbeInitialized;
+        private SphericalHarmonicsL2 staticPbrSkyAmbientProbe;
     #endif
         public CloudsRenderMode renderMode;
         public float resolutionScale;
@@ -768,6 +769,14 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
         private void UpdateClouds(Light mainLight, Camera camera)
         {
+#if URP_PBSKY
+            if (useCachedPbrSkyAmbientProbe && !staticPbrSkyAmbientProbeInitialized && mainLight != null)
+            {
+                staticPbrSkyAmbientProbe = PhysicallyBasedSkyURP.EvaluateAmbientProbe(pbrSky, visualEnvVolume, mainLight, camera.transform.position);
+                staticPbrSkyAmbientProbeInitialized = true;
+            }
+#endif
+
             // When using PBSky, we already applied the sun attenuation to "_MainLightColor"
             if (sunAttenuation)
             {
@@ -860,6 +869,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             if (!dynamicAmbientProbe)
             {
                 SphericalHarmonicsL2 ambientProbe = RenderSettings.ambientProbe;
+#if URP_PBSKY
+                if (useCachedPbrSkyAmbientProbe && staticPbrSkyAmbientProbeInitialized)
+                    ambientProbe = staticPbrSkyAmbientProbe;
+#endif
 
                 cloudsMaterial.SetVector(shAr, new Vector4(ambientProbe[0, 3], ambientProbe[0, 1], ambientProbe[0, 2], ambientProbe[0, 0] - ambientProbe[0, 6]));
                 cloudsMaterial.SetVector(shAg, new Vector4(ambientProbe[1, 3], ambientProbe[1, 1], ambientProbe[1, 2], ambientProbe[1, 0] - ambientProbe[1, 6]));
@@ -870,6 +883,13 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 cloudsMaterial.SetVector(shC, new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1));
             }
         }
+
+#if URP_PBSKY
+        public void ResetStaticPbrSkyAmbientProbe()
+        {
+            staticPbrSkyAmbientProbeInitialized = false;
+        }
+#endif
 
 #if OPTIMISATION
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]

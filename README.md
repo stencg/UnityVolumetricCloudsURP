@@ -71,6 +71,18 @@ Some features are gated behind C# preprocessor defines. Add the ones you want to
 > The default column reflects the *recommended* state when you first install the package;
 > none of these are set automatically, so add them explicitly.
 
+> **`VC_AMBIENT` with Physically Based Sky URP:** The cloud renderer feature's **Dynamic**
+> ambient mode and the Visual Environment ambient mode are independent. When Visual Environment
+> is **Dynamic**, clouds use the PBR sky's spherical-harmonics probe and skip the additional
+> `VC_AMBIENT` pass. When Visual Environment is **Static** but the cloud renderer is **Dynamic**,
+> clouds instead use the 16x16 `VC_AMBIENT` cubemap (sampled from a filtered mip), so a small
+> brightness or color difference between the two Visual Environment modes is expected. For the
+> closest match and lower cost with PBR sky, set the cloud renderer's ambient mode to **Static**;
+> PBR sky supplies the appropriate spherical harmonics in both Visual Environment modes. The
+> dynamic `VC_AMBIENT` path is primarily useful with non-PBR or custom skies. Diffuse object
+> lighting should still match between PBR sky modes, while specular lighting may differ because
+> Dynamic uses a runtime reflection cubemap and Static uses the baked/default environment reflection.
+
 ### Automatically defined (via `versionDefines` in the `.asmdef`)
 
 These are set for you by the assembly definition based on which packages are installed, so you

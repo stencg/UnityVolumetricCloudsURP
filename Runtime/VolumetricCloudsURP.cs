@@ -33,6 +33,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     [SerializeField] private float resolutionScale = 0.5f;
     [Tooltip("Select the method to use for upscaling volumetric clouds.")]
     [SerializeField] private CloudsUpscaleMode upscaleMode = CloudsUpscaleMode.Bilinear;
+    [Tooltip("Smooths cloud coverage only along opaque/sky boundaries. This is a low-cost approximation for aliased cloud/geometry contours; it can slightly soften small foreground details.")]
+    [SerializeField] private bool depthAwareEdgeFilter = false;
+    [Tooltip("Shows the opaque/sky boundary detected by Depth Aware Edge Filter as a white overlay.")]
+    [SerializeField] private bool depthAwareEdgeFilterDebug = false;
     [Tooltip("Specifies the preferred texture render mode for volumetric clouds. \nThe Copy Texture mode should be more performant.")]
     [SerializeField] private CloudsRenderMode preferredRenderMode = CloudsRenderMode.CopyTexture;
 
@@ -146,6 +150,24 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     {
         get { return upscaleMode; }
         set { upscaleMode = value; }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether cloud coverage is smoothed at opaque/sky boundaries.
+    /// </summary>
+    public bool DepthAwareEdgeFilter
+    {
+        get { return depthAwareEdgeFilter; }
+        set { depthAwareEdgeFilter = value; }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to show the depth-aware edge-filter mask.
+    /// </summary>
+    public bool DepthAwareEdgeFilterDebug
+    {
+        get { return depthAwareEdgeFilterDebug; }
+        set { depthAwareEdgeFilterDebug = value; }
     }
 
     /// <summary>
@@ -373,10 +395,16 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             volumetricCloudsPass.colorAdjustments = colorAdjustments;
             volumetricCloudsPass.dynamicAmbientProbe = dynamicAmbientProbe;
             volumetricCloudsPass.renderMode = preferredRenderMode;
+            volumetricCloudsPass.depthAwareEdgeFilter = depthAwareEdgeFilter;
+            volumetricCloudsPass.depthAwareEdgeFilterDebug = depthAwareEdgeFilterDebug;
             volumetricCloudsPass.resetWindOnStart = resetOnStart;
             volumetricCloudsPass.outputDepth = depthTexture || outputDepth; // Implicitly enable clouds depth when we need to output to scene depth
             volumetricCloudsPass.outputToSceneDepth = depthTexture;
             volumetricCloudsPass.sunAttenuation = sunAttenuation;
+
+            // The cloud shaders sample _CameraDepthTexture to stop clouds behind opaque geometry.
+            // Declare this before enqueuing so URP schedules the camera-depth texture for this frame.
+            volumetricCloudsPass.ConfigureInput(ScriptableRenderPassInput.Depth);
         #if URP_PBSKY
             volumetricCloudsPass.pbrSky = pbrSky;
             volumetricCloudsPass.useCachedPbrSkyAmbientProbe = useCachedPbrSkyAmbientProbe;
@@ -471,6 +499,8 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         public CloudsRenderMode renderMode;
         public float resolutionScale;
         public CloudsUpscaleMode upscaleMode;
+        public bool depthAwareEdgeFilter;
+        public bool depthAwareEdgeFilterDebug;
         public bool dynamicAmbientProbe;
         public bool resetWindOnStart;
         public bool outputDepth;
@@ -569,6 +599,8 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private const string outputCloudsDepth = "_OUTPUT_CLOUDS_DEPTH";
         private const string physicallyBasedSun = "_PHYSICALLY_BASED_SUN";
         private const string perceptualBlending = "_PERCEPTUAL_BLENDING";
+        private const string depthAwareCloudEdgeFilterKeyword = "_DEPTH_AWARE_CLOUD_EDGE_FILTER";
+        private const string depthAwareCloudEdgeFilterDebugKeyword = "_DEPTH_AWARE_CLOUD_EDGE_FILTER_DEBUG";
 
         private const string _CameraDepthTexture = "_CameraDepthTexture";
         private const string _VolumetricCloudsColorTexture = "_VolumetricCloudsColorTexture";
@@ -577,6 +609,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private const string _VolumetricCloudsDepthTexture = "_VolumetricCloudsDepthTexture";
         private const string _VolumetricCloudsLightingTexture = "_VolumetricCloudsLightingTexture"; // Same as "_VolumetricCloudsColorTexture"
         private const string _CameraTempDepthTexture = "_CameraTempDepthTexture";
+        private static readonly int depthAwareCloudEdgeFilterWidth = Shader.PropertyToID("_DepthAwareCloudEdgeFilterWidth");
 
         private static readonly Vector4 m_ScaleBias = new Vector4(1.0f, 1.0f, 0.0f, 0.0f);
 
@@ -658,6 +691,12 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
             if (cloudsVolume.perceptualBlending.value > 0.0f) { cloudsMaterial.EnableKeyword(perceptualBlending); }
             else { cloudsMaterial.DisableKeyword(perceptualBlending); }
+
+            if (depthAwareEdgeFilter || depthAwareEdgeFilterDebug) { cloudsMaterial.EnableKeyword(depthAwareCloudEdgeFilterKeyword); }
+            else { cloudsMaterial.DisableKeyword(depthAwareCloudEdgeFilterKeyword); }
+
+            if (depthAwareEdgeFilterDebug) { cloudsMaterial.EnableKeyword(depthAwareCloudEdgeFilterDebugKeyword); }
+            else { cloudsMaterial.DisableKeyword(depthAwareCloudEdgeFilterDebugKeyword); }
 
             cloudsMaterial.SetFloat(numPrimarySteps, cloudsVolume.numPrimarySteps.value);
             cloudsMaterial.SetFloat(numLightSteps, cloudsVolume.numLightSteps.value);
@@ -752,6 +791,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             cloudsMaterial.SetFloat(earthRadius, actualEarthRad);
             cloudsMaterial.SetFloat(accumulationFactor, cloudsVolume.temporalAccumulationFactor.value);
             cloudsMaterial.SetFloat(improvedTransmittanceBlend, cloudsVolume.perceptualBlending.value);
+            cloudsMaterial.SetFloat(depthAwareCloudEdgeFilterWidth, Mathf.Max(1.0f, 1.0f / resolutionScale));
             Vector3 cameraPosPS = cameraPosition - new Vector3(0.0f, -actualEarthRad, 0.0f);
             cloudsMaterial.SetFloat(cloudnearPlane, max(GetCloudNearPlane(cameraPosPS, bottomAltitude, highestAltitude), nearClipPlane));
 

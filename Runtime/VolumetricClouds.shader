@@ -194,8 +194,12 @@ Shader "Hidden/Sky/VolumetricClouds"
             SAMPLER(s_linear_clamp_sampler);
 
             #pragma multi_compile_local_fragment _ _LOW_RESOLUTION_CLOUDS
+            #pragma multi_compile_local_fragment _ _DEPTH_AWARE_CLOUD_EDGE_FILTER
+            #pragma multi_compile_local_fragment _ _DEPTH_AWARE_CLOUD_EDGE_FILTER_DEBUG
 
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
             #include "./VolumetricCloudsUpscale.hlsl"
+            #include "./VolumetricCloudsEdgeFilter.hlsl"
             
             half4 frag(Varyings input) : SV_Target
             {
@@ -206,6 +210,14 @@ Shader "Hidden/Sky/VolumetricClouds"
                 half4 cloudsColor = BilateralUpscale(screenUV);
             #else
                 half4 cloudsColor = SAMPLE_TEXTURE2D_X_LOD(_VolumetricCloudsLightingTexture, s_linear_clamp_sampler, screenUV, 0).rgba;
+            #endif
+
+            #if defined(_DEPTH_AWARE_CLOUD_EDGE_FILTER)
+                bool opaqueEdge;
+                cloudsColor = FilterCloudsAtOpaqueDepthEdges(cloudsColor, screenUV, opaqueEdge);
+                #if defined(_DEPTH_AWARE_CLOUD_EDGE_FILTER_DEBUG)
+                return half4(opaqueEdge ? 1.0 : 0.0, opaqueEdge ? 1.0 : 0.0, opaqueEdge ? 1.0 : 0.0, 1.0);
+                #endif
             #endif
 
                 return half4(cloudsColor.xyz, cloudsColor.w);
@@ -574,6 +586,8 @@ Shader "Hidden/Sky/VolumetricClouds"
 
             #pragma multi_compile_local_fragment _ _LOW_RESOLUTION_CLOUDS
             #pragma multi_compile_local_fragment _ _OUTPUT_CLOUDS_DEPTH
+            #pragma multi_compile_local_fragment _ _DEPTH_AWARE_CLOUD_EDGE_FILTER
+            #pragma multi_compile_local_fragment _ _DEPTH_AWARE_CLOUD_EDGE_FILTER_DEBUG
 
             #pragma multi_compile_fragment _ PHYSICALLY_BASED_SKY
 
@@ -594,6 +608,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
             #include "./VolumetricCloudsDefs.hlsl"
             #include "./VolumetricCloudsUpscale.hlsl"
+            #include "./VolumetricCloudsEdgeFilter.hlsl"
 
             half4 frag(Varyings input) : SV_Target
             {
@@ -604,6 +619,14 @@ Shader "Hidden/Sky/VolumetricClouds"
                 half4 cloudsColor = BilateralUpscale(screenUV);
             #else
                 half4 cloudsColor = SAMPLE_TEXTURE2D_X_LOD(_VolumetricCloudsLightingTexture, s_linear_clamp_sampler, screenUV, 0).rgba;
+            #endif
+
+            #if defined(_DEPTH_AWARE_CLOUD_EDGE_FILTER)
+                bool opaqueEdge;
+                cloudsColor = FilterCloudsAtOpaqueDepthEdges(cloudsColor, screenUV, opaqueEdge);
+                #if defined(_DEPTH_AWARE_CLOUD_EDGE_FILTER_DEBUG)
+                return half4(opaqueEdge ? 1.0 : 0.0, opaqueEdge ? 1.0 : 0.0, opaqueEdge ? 1.0 : 0.0, 1.0);
+                #endif
             #endif
 
             #ifdef PHYSICALLY_BASED_SKY

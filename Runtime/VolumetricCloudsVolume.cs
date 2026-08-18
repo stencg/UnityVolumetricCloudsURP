@@ -200,7 +200,7 @@ public class VolumetricClouds : VolumeComponent, IPostProcessComponent
     /// Specifies the tint of the cloud scattering color.
     /// </summary>
     [Tooltip("Specifies the tint of the cloud scattering color.")]
-    public ColorParameter scatteringTint = new(new Color(0.0f, 0.0f, 0.0f, 1.0f));
+    public ColorParameter scatteringTint = new(new Color(0.8f, 0.8f, 0.8f, 1.0f));
 
     /// <summary>
     /// Controls the amount of local scattering in the clouds. A higher value may produce a more powdery or diffused aspect.

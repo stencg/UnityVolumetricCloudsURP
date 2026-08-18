@@ -41,7 +41,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     [SerializeField] private CloudsRenderMode preferredRenderMode = CloudsRenderMode.CopyTexture;
 
     [Header("Lighting")]
-    [Tooltip("Specifies the volumetric clouds ambient probe update frequency.")]
+    [Tooltip("Specifies the volumetric clouds ambient probe update frequency. Dynamic requires the VC_AMBIENT scripting define, unless Physically Based Sky URP provides an active dynamic sky ambient probe; otherwise Static is used.")]
     [SerializeField] private CloudsAmbientMode ambientProbe = CloudsAmbientMode.Static;
     [Tooltip("Specifies if URP calculates physically based sun attenuation for volumetric clouds.")]
     [SerializeField] private bool sunAttenuation = false;
@@ -229,7 +229,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         [Tooltip("Use URP default static ambient probe for volumetric clouds rendering.")]
         Static,
 
-        [Tooltip("Use a fast dynamic ambient probe for volumetric clouds rendering.")]
+        [Tooltip("Use a fast dynamic ambient probe. Requires the VC_AMBIENT scripting define, unless Physically Based Sky URP provides an active dynamic sky ambient probe; otherwise Static is used.")]
         Dynamic
     }
 
@@ -365,9 +365,14 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
             PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
 
-            // Check if the ambient probe is already updating dynamically.
+            // Use PBSky's ambient probe when it is already updating dynamically.
             bool isDynamicPbrSky = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyAmbientMode.value == VisualEnvironment.SkyAmbientMode.Dynamic && Shader.IsKeywordEnabled(VISUAL_ENVIRONMENT_DYNAMIC_SKY);
+#if VC_AMBIENT
             bool dynamicAmbientProbe = !isDynamicPbrSky && ambientProbe == CloudsAmbientMode.Dynamic;
+#else
+            // Without the custom ambient pass, only an active dynamic PBSky probe can update ambient lighting.
+            bool dynamicAmbientProbe = false;
+#endif
             bool isStaticPbrSky = visualEnvironment != null && visualEnvironment.IsActive()
                 && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased
                 && visualEnvironment.skyAmbientMode.value == VisualEnvironment.SkyAmbientMode.Static;
@@ -388,7 +393,11 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
             bool updateAmbientProbe = dynamicAmbientProbe;
         #else
+#if VC_AMBIENT
             bool dynamicAmbientProbe = ambientProbe == CloudsAmbientMode.Dynamic;
+#else
+            bool dynamicAmbientProbe = false;
+#endif
             bool updateAmbientProbe = dynamicAmbientProbe;
         #endif
             volumetricCloudsPass.cloudsVolume = cloudsVolume;

@@ -51,7 +51,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     [SerializeField] private bool resetOnStart = true;
 
     [Header("Depth")]
-    [Tooltip("Specifies if URP outputs volumetric clouds average depth to a global shader texture named \"_VolumetricCloudsDepthTexture\".")]
+    [Tooltip("Outputs volumetric clouds average depth to the global shader texture \"_VolumetricCloudsDepthTexture\". Enable this for physically accurate atmospheric scattering based on cloud distance. When neither this nor the experimental camera-depth output is enabled, cloud scattering remains enabled and uses a far-plane approximation.")]
     [SerializeField] private bool outputDepth = true;
 
     [Header("Experimental"), Tooltip("Specifies if URP also outputs volumetric clouds average depth to \"_CameraDepthTexture\".")]

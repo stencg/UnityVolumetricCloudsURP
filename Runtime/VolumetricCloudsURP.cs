@@ -578,6 +578,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private static readonly int cloudnearPlane = Shader.PropertyToID("_CloudNearPlane");
         private static readonly int sunColor = Shader.PropertyToID("_SunColor");
         private static readonly int planetCenterRadius = Shader.PropertyToID("_PlanetCenterRadius");
+        private static readonly int screenResolution = Shader.PropertyToID("_ScreenResolution");
         private static readonly int postExposure = Shader.PropertyToID("_PostExposure");
 
         private static readonly int cameraDepthTexture = Shader.PropertyToID(_CameraDepthTexture);
@@ -1108,6 +1109,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferPool.Get();
             using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
+                RenderTextureDescriptor cameraDescriptor = renderingData.cameraData.cameraTargetDescriptor;
+                cmd.SetGlobalVector(screenResolution, new Vector4(cameraDescriptor.width, cameraDescriptor.height, 1.0f / cameraDescriptor.width, 1.0f / cameraDescriptor.height));
+
                 //RenderTargetIdentifier[] cloudsHandles = new RenderTargetIdentifier[2];
                 //cloudsRTHandles[0] = cloudsColorHandle;
                 //cloudsRTHandles[1] = cloudsDepthHandle;
@@ -1190,6 +1194,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             internal bool outputDepth;
             internal bool outputToSceneDepth;
             internal bool hasAtmosphericScattering;
+            internal Vector4 screenResolution;
 
             internal TextureHandle cameraColorHandle;
             internal TextureHandle activeDepthHandle;
@@ -1219,6 +1224,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 return;
 
             CommandBuffer cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            cmd.SetGlobalVector(screenResolution, data.screenResolution);
 
             // Clouds Upscale & Combine
             Blitter.BlitCameraTexture(cmd, data.cloudsColorHandle, data.cameraColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, data.cloudsMaterial, pass: GetCombinePass(data.cloudsMaterial, data.hasAtmosphericScattering));
@@ -1442,6 +1448,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 passData.outputDepth = outputDepth;
                 passData.outputToSceneDepth = outputToSceneDepth && (cameraData.camera.cameraType == CameraType.Game || cameraData.camera.cameraType == CameraType.SceneView);
                 passData.hasAtmosphericScattering = hasAtmosphericScattering;
+                passData.screenResolution = new Vector4(desc.width, desc.height, 1.0f / desc.width, 1.0f / desc.height);
 
                 passData.cloudsColorHandle = cloudsTextureHandle;
 #if VC_DENOISE

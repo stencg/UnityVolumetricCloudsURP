@@ -546,10 +546,10 @@ Shader "Hidden/Sky/VolumetricClouds"
 
         Pass
         {
-            // Skip compiling this pass if PBSky is not installed
+            // Compile this pass only when PBSky 1.0.0 or newer is available.
             PackageRequirements { "com.jiaozi158.unity-physically-based-sky-urp": "1.0.0" }
 
-            Name "Volumetric Clouds Combine"
+            Name "Volumetric Clouds Combine PBSky"
             Tags { "LightMode" = "Volumetric Clouds" }
 
             Blend One SrcAlpha, Zero One
@@ -596,12 +596,11 @@ Shader "Hidden/Sky/VolumetricClouds"
         #if defined(PHYSICALLY_BASED_SKY)
             #include "Packages/com.jiaozi158.unity-physically-based-sky-urp/Shaders/PhysicallyBasedSkyRendering.hlsl"
             #include "Packages/com.jiaozi158.unity-physically-based-sky-urp/Shaders/PhysicallyBasedSkyEvaluation.hlsl"
+            #define OPAQUE_FOG_PASS
             #include "Packages/com.jiaozi158.unity-physically-based-sky-urp/Shaders/AtmosphericScattering.hlsl"
         #endif
 
             #define RAW_FAR_CLIP_THRESHOLD 1e-6
-
-            #define OPAQUE_FOG_PASS
 
             // Offset the clouds virtual z-depth for atmospheric scattering calculation
             #define CLOUDS_RAW_FAR_CLIP_VALUE  UNITY_RAW_FAR_CLIP_VALUE ? (UNITY_RAW_FAR_CLIP_VALUE - RAW_FAR_CLIP_THRESHOLD) : (UNITY_RAW_FAR_CLIP_VALUE + RAW_FAR_CLIP_THRESHOLD)
@@ -630,7 +629,7 @@ Shader "Hidden/Sky/VolumetricClouds"
             #endif
 
             #ifdef PHYSICALLY_BASED_SKY
-                if (_EnableAtmosphericScattering)
+                if (_EnableAtmosphericScattering || _FogEnabled)
                 {
                     // We don't force enabling clouds depth, but it's required to achieve physically accurate results
                 #ifdef _OUTPUT_CLOUDS_DEPTH
@@ -660,7 +659,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
         Pass
         {
-            // Skip compiling this pass if PBSky is not installed
+            // Compile this pass only when PBSky 1.0.0 or newer is available.
             PackageRequirements { "com.jiaozi158.unity-physically-based-sky-urp": "1.0.0" }
 
             Name "Volumetric Clouds Update Environment"

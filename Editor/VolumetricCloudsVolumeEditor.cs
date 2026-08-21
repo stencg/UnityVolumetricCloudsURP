@@ -107,6 +107,7 @@ class VolumetricCloudsEditor : VolumeComponentEditor
 
     const string k_LocalCloudsMessage = "\"Local Clouds\" is controlled by \"Rendering Space\" in the \"Visual Environment\" override while a sky is selected.";
     const string k_EarthCurvatureMessage = "\"Earth Curvature\" is controlled by \"Planet Radius\" in the \"Visual Environment\" override while a sky is selected.";
+    const string k_AtmosphericScatteringDepthMessage = "Physically accurate atmospheric scattering on Volumetric Clouds requires Output Depth in the Volumetric Clouds renderer feature. Without cloud depth, scattering uses a far-plane approximation.";
 
     const string k_CustomSkyShaderGraphMessage = "It looks like the \"Sky Material\" is using a shader graph. Please ensure that the \"Render Face\" setting is set to \"Both\".";
 
@@ -217,7 +218,19 @@ class VolumetricCloudsEditor : VolumeComponentEditor
             EditorGUILayout.HelpBox(k_NoRendererFeatureMessage, MessageType.Error, wide: true);
             return;
         }
-        else if (!clouds.isActive)
+
+    #if URP_PBSKY
+        var stack = VolumeManager.instance.stack;
+        PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
+        bool missingCloudDepth = !clouds.OutputCloudsDepth && !clouds.OutputToSceneDepth;
+        if (missingCloudDepth && pbrSky != null && pbrSky.atmosphericScattering.value)
+        {
+            EditorGUILayout.HelpBox(k_AtmosphericScatteringDepthMessage, MessageType.Warning, wide: true);
+            EditorGUILayout.Space();
+        }
+    #endif
+
+        if (!clouds.isActive)
         {
             EditorGUILayout.Space();
             CoreEditorUtils.DrawFixMeBox(k_RendererFeatureOffMessage, MessageType.Warning, k_FixButtonName, () =>
@@ -253,7 +266,6 @@ class VolumetricCloudsEditor : VolumeComponentEditor
         PropertyField(m_Enable);
 
     #if URP_PBSKY
-        var stack = VolumeManager.instance.stack;
         VisualEnvironment visualEnvVolume = stack.GetComponent<VisualEnvironment>();
         bool hasVisualEnvVolume = visualEnvVolume != null && visualEnvVolume.IsActive() && visualEnvVolume.skyType.value != 0;
 

@@ -425,7 +425,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
 #if URP_PBSKY
             Fog fog = stack.GetComponent<Fog>();
-            volumetricCloudsPass.hasAtmosphericScattering = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased && pbrSky != null && pbrSky.IsActive() && pbrSky.atmosphericScattering.value;
+            volumetricCloudsPass.hasAtmosphericScattering = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased && pbrSky != null && pbrSky.atmosphericScattering.value;
             volumetricCloudsPass.hasAtmosphericScattering |= fog != null && fog.IsActive();
             volumetricCloudsPass.visualEnvVolume = visualEnvironment;
 #else
@@ -492,8 +492,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private const string rasterPassProfilerTag = "Trace Volumetric Clouds";
         private const string profilerTag = "Volumetric Clouds";
         private const int combinePass = 1;
-        private const int physicallyBasedSkyCombinePass = 7;
+        private const string physicallyBasedSkyCombinePassName = "Volumetric Clouds Combine PBSky";
         private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(profilerTag);
+        private static bool missingPhysicallyBasedSkyCombinePassLogged;
 
         public VolumetricClouds cloudsVolume;
         public ColorAdjustments colorAdjustments;
@@ -534,11 +535,20 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
         private static int GetCombinePass(Material material, bool hasAtmosphericScattering)
         {
-            // PackageRequirements passes can be omitted from the runtime shader on some
-            // graphics APIs. Never submit the optional PBSky pass unless it is present.
-            return hasAtmosphericScattering && material.passCount > physicallyBasedSkyCombinePass
-                ? physicallyBasedSkyCombinePass
-                : combinePass;
+            if (!hasAtmosphericScattering)
+                return combinePass;
+
+            int pass = material.FindPass(physicallyBasedSkyCombinePassName);
+            if (pass >= 0)
+                return pass;
+
+            if (!missingPhysicallyBasedSkyCombinePassLogged)
+            {
+                Debug.LogWarning($"Volumetric Clouds URP: Shader pass '{physicallyBasedSkyCombinePassName}' is unavailable. Atmospheric scattering and fog will not affect volumetric clouds; using the standard combine pass instead.");
+                missingPhysicallyBasedSkyCombinePassLogged = true;
+            }
+
+            return combinePass;
         }
 
         private static readonly int numPrimarySteps = Shader.PropertyToID("_NumPrimarySteps");
@@ -1423,7 +1433,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 {
                     TextureHandle cloudsDepthTextureHandle = renderGraph.ImportTexture(cloudsDepthHandle);
                     passData.cloudsDepthHandle = cloudsDepthTextureHandle;
-                    builder.UseTexture(passData.cloudsDepthHandle, AccessFlags.Write);
+                    builder.UseTexture(passData.cloudsDepthHandle, AccessFlags.Read);
                     builder.SetGlobalTextureAfterPass(cloudsDepthTextureHandle, volumetricCloudsDepthTexture);
                 }
 
@@ -1476,6 +1486,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #endif // VC_DEPTH
                 builder.UseTexture(passData.cameraColorHandle, passData.denoiseClouds ? AccessFlags.ReadWrite : AccessFlags.Write);
                 builder.UseTexture(passData.cloudsColorHandle, AccessFlags.None);
+                builder.UseAllGlobalTextures(true);
 #if VC_DENOISE
                 if (passData.denoiseClouds)
                 {

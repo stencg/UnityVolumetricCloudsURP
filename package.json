@@ -4,7 +4,7 @@
   "displayName": "Unity Volumetric Clouds URP",
   "description": "Volumetric Clouds for Unity URP (Universal Render Pipeline).",
   "documentationUrl": "https://github.com/stencg/UnityVolumetricCloudsURP",
-  "unity": "2022.3",
+  "unity": "6000.0",
   "license": "MIT",
   "licensesUrl": "https://github.com/stencg/UnityVolumetricCloudsURP/blob/main/LICENSE",
   "repository": {
@@ -16,8 +16,8 @@
     "unity"
   ],
   "dependencies": {
-    "com.unity.render-pipelines.core": "14.0.11",
-    "com.unity.render-pipelines.universal": "14.0.11",
+    "com.unity.render-pipelines.core": "17.0.4",
+    "com.unity.render-pipelines.universal": "17.0.4",
     "com.unity.mathematics": "1.2.6"
   }
 }

@@ -908,10 +908,6 @@ public class VolumetricCloudsUtilities
 
         public void Execute(int index)
         {
-#if ZERO
-            UnityEngine.Assertions.Assert.AreApproximatelyEqual(1f, ((Vector3)directionWS[index]).magnitude, "directionWS must be normalised.");
-#endif // ZERO
-
             cloudRay[index] = new CloudRay
             {
                 originWS = startPosWS[index],

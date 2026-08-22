@@ -32,6 +32,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     private CloudLayerShadowPass _shadowPass;
     private bool _missingResourcesLogged;
     private bool _unsupportedCookiesLogged;
+    private static bool _compatibilityModeErrorLogged;
 
     private static class ShaderIds
     {
@@ -113,6 +114,21 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     /// <param name="renderingData">Данные текущей камеры.</param>
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
+#pragma warning disable CS0618 // Obsolete in Unity 6.4+, where Compatibility Mode no longer exists and this is always false.
+        RenderGraphSettings renderGraphSettings = GraphicsSettings.GetRenderPipelineSettings<RenderGraphSettings>();
+        bool compatibilityModeEnabled = renderGraphSettings != null && renderGraphSettings.enableRenderCompatibilityMode;
+#pragma warning restore CS0618
+        if (compatibilityModeEnabled)
+        {
+            if (!_compatibilityModeErrorLogged)
+            {
+                Debug.LogError("Cloud Layer URP requires URP Render Graph. Disable Compatibility Mode in Project Settings > Graphics before using this renderer feature.");
+                _compatibilityModeErrorLogged = true;
+            }
+
+            return;
+        }
+
         if (_material == null || _bakeCloudTexture == null || _bakeCloudShadows == null || !SystemInfo.supportsComputeShaders)
         {
             if (!_missingResourcesLogged)
@@ -216,8 +232,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     private sealed class CloudLayerResources
     {
         private const int ThreadGroupSize = 8;
-        private static readonly ProfilingSampler BakeTextureSampler = new("Bake Cloud Layer Texture");
-        private static readonly ProfilingSampler BakeShadowsSampler = new("Bake Cloud Layer Shadows");
+        private static readonly ProfilingSampler BakeTextureSampler = new("Cloud Layer: Bake Cloud Texture");
+        private static readonly ProfilingSampler BakeShadowsSampler = new("Cloud Layer: Bake Shadow Texture");
         private static readonly Matrix4x4 DirectionalLightProjection =
             Matrix4x4.Ortho(-0.5f, 0.5f, -0.5f, 0.5f, -0.5f, 0.5f);
 
@@ -334,7 +350,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             TextureHandle cloudMapA = renderGraph.ImportTexture(_cloudMapA);
             TextureHandle cloudMapB = renderGraph.ImportTexture(_cloudMapB);
             using (var builder = renderGraph.AddComputePass<CloudTexturePassData>(
-                "Bake Cloud Layer Texture",
+                "Cloud Layer: Bake Cloud Texture",
                 out var passData,
                 BakeTextureSampler))
             {
@@ -399,7 +415,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             TextureHandle flowmapA = renderGraph.ImportTexture(_flowmapA);
             TextureHandle flowmapB = renderGraph.ImportTexture(_flowmapB);
             using (var builder = renderGraph.AddComputePass<CloudShadowPassData>(
-                "Bake Cloud Layer Shadows",
+                "Cloud Layer: Bake Shadow Texture",
                 out var passData,
                 BakeShadowsSampler))
             {
@@ -666,7 +682,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
 
     private sealed class CloudLayerRenderPass : ScriptableRenderPass
     {
-        private static readonly ProfilingSampler RenderSampler = new("Render Cloud Layer");
+        private static readonly ProfilingSampler RenderSampler = new("Cloud Layer: Combine with Camera Color");
         private static readonly MaterialPropertyBlock PropertyBlock = new();
         private static readonly Vector3[] FrustumCorners = new Vector3[4];
 
@@ -750,7 +766,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             TextureHandle cloudTexture = _resources.RecordCloudTextureBake(renderGraph, _cloudLayer, sunLight);
 
             using (var builder = renderGraph.AddRasterRenderPass<RenderPassData>(
-                "Render Cloud Layer",
+                "Cloud Layer: Combine with Camera Color",
                 out var passData,
                 RenderSampler))
             {

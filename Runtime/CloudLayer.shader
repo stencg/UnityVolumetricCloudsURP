@@ -6,7 +6,7 @@ Shader "Hidden/Sky/CloudLayerURP"
 
         Pass
         {
-            Name "Cloud Layer"
+            Name "Cloud Layer - Combine with Camera Color"
             ZWrite Off
             ZTest Always
             Blend One OneMinusSrcAlpha

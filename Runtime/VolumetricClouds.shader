@@ -48,19 +48,19 @@ Shader "Hidden/Sky/VolumetricClouds"
         Cull Off ZWrite Off
         ZTest Less  // Required for XR occlusion mesh optimization
 
-        // Pass 0: Volumetric Clouds
-        // Pass 1: Upscale + Combine
-        // Pass 2: Prepare Denoising
-        // Pass 3: Temporal Denoising
-        // Pass 4: Volumetric Clouds Shadows
-        // Pass 5: Shadows Filtering
-        // Pass 6: Testing (output to scene depth)
-        // Pass 7: Upscale + Combine (Physically Based Sky)
-        // Pass 8: Volumetric Clouds Update Environment (Physically Based Sky)
+        // Pass 0: Trace low-resolution cloud lighting, transmittance, and optional depth
+        // Pass 1: Upscale and combine clouds with camera color
+        // Pass 2: Copy cloud lighting and transmittance
+        // Pass 3: Accumulate low-resolution cloud history
+        // Pass 4: Trace the cloud shadow cookie
+        // Pass 5: Filter the cloud shadow cookie
+        // Pass 6: Update the camera depth texture with cloud depth
+        // Pass 7: Upscale and combine clouds with PBSky scattering
+        // Pass 8: Update the PBSky environment cubemap
 
         Pass
         {
-            Name "Volumetric Clouds"
+            Name "Volumetric Clouds - Trace"
             // Disable material preview to avoid render graph warning of accessing textures outside the render pass
             Tags { "LightMode" = "Volumetric Clouds" "PreviewType" = "None" }
 
@@ -167,7 +167,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
         Pass
         {
-            Name "Volumetric Clouds Combine"
+            Name "Volumetric Clouds - Combine with Camera Color"
 			Tags { "LightMode" = "Volumetric Clouds" }
 
             Blend One SrcAlpha, Zero One
@@ -227,7 +227,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
         Pass
         {
-            Name "Volumetric Clouds Blit"
+            Name "Volumetric Clouds - Copy Cloud Data"
             Tags { "LightMode" = "Volumetric Clouds" }
 
             Blend One Zero
@@ -243,41 +243,22 @@ Shader "Hidden/Sky/VolumetricClouds"
 
             #pragma target 3.5
             
-            TEXTURE2D_X(_VolumetricCloudsLightingTexture);
-            float4 _VolumetricCloudsLightingTexture_TexelSize;
-
             SAMPLER(s_linear_clamp_sampler);
-
-            #pragma multi_compile_local_fragment _ _LOW_RESOLUTION_CLOUDS
-
-            #include "./VolumetricCloudsUpscale.hlsl"
 
             half4 frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-                float2 screenUV = input.texcoord;
-
-                half3 sceneColor = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s_linear_clamp_sampler, screenUV, 0).rgb;
-
-            #ifdef _LOW_RESOLUTION_CLOUDS
-                half transmittance = BilateralUpscaleTransmittance(screenUV);
-            #else
-                half transmittance = SAMPLE_TEXTURE2D_X_LOD(_VolumetricCloudsLightingTexture, s_linear_clamp_sampler, screenUV, 0).a;
-            #endif
-
-                // The camera color buffer (_BlitTexture) may not have an alpha channel (32 Bits)
-                // We use a custom blit shader instead
-                return half4(sceneColor.rgb, transmittance);
+                return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s_linear_clamp_sampler, input.texcoord, 0).rgba;
             }
             ENDHLSL
         }
 
         Pass
         {
-            Name "Volumetric Clouds Denoise"
+            Name "Volumetric Clouds - Temporal Accumulation"
             Tags { "LightMode" = "Volumetric Clouds" }
 
-            Blend SrcAlpha OneMinusSrcAlpha, Zero One
+            Blend One Zero
 			
             HLSLPROGRAM
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -297,6 +278,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
             TEXTURE2D_X(_VolumetricCloudsLightingTexture);
             TEXTURE2D_X(_VolumetricCloudsHistoryTexture);
+            float _VolumetricCloudsHistoryValid;
 
             SAMPLER(s_point_clamp_sampler);
 
@@ -305,18 +287,16 @@ Shader "Hidden/Sky/VolumetricClouds"
             float4 _BlitTexture_TexelSize;
         #endif
 
-            half3 SampleColorPoint(float2 uv, float2 texelOffset)
+            half4 SampleColorPoint(float2 uv, float2 texelOffset)
             {
-                return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s_point_clamp_sampler, uv + _BlitTexture_TexelSize.xy * texelOffset, 0).xyz;
+                return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s_point_clamp_sampler, uv + _BlitTexture_TexelSize.xy * texelOffset, 0).rgba;
             }
             
-            void AdjustColorBox(inout half3 boxMin, inout half3 boxMax, inout half3 moment1, inout half3 moment2, float2 uv, half currX, half currY)
+            void AdjustColorBox(inout half4 boxMin, inout half4 boxMax, float2 uv, half currX, half currY)
             {
-                half3 color = SampleColorPoint(uv, float2(currX, currY));
+                half4 color = SampleColorPoint(uv, float2(currX, currY));
                 boxMin = min(color, boxMin);
                 boxMax = max(color, boxMax);
-                moment1 += color;
-                moment2 += color * color;
             }
 
             // From Playdead's TAA
@@ -355,22 +335,23 @@ Shader "Hidden/Sky/VolumetricClouds"
 
                 half4 cloudsColor = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s_point_clamp_sampler, screenUV, 0).rgba;
 
+                if (_VolumetricCloudsHistoryValid < 0.5)
+                    return cloudsColor;
+
                 if (cloudsColor.a == 1.0)
-                    return half4(0.0, 0.0, 0.0, 0.0);
+                    return cloudsColor;
 
                 // Color Variance
-                half3 colorCenter = cloudsColor.xyz;
+                half4 colorCenter = cloudsColor;
 
-                half3 boxMax = colorCenter;
-                half3 boxMin = colorCenter;
-                half3 moment1 = colorCenter;
-                half3 moment2 = colorCenter * colorCenter;
+                half4 boxMax = colorCenter;
+                half4 boxMin = colorCenter;
 
                 // adjacent pixels
-                AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 0.0, -1.0);
-                AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, -1.0, 0.0);
-                AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 1.0, 0.0);
-                AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 0.0, 1.0);
+                AdjustColorBox(boxMin, boxMax, screenUV, 0.0, -1.0);
+                AdjustColorBox(boxMin, boxMax, screenUV, -1.0, 0.0);
+                AdjustColorBox(boxMin, boxMax, screenUV, 1.0, 0.0);
+                AdjustColorBox(boxMin, boxMax, screenUV, 0.0, 1.0);
 
                 // Reconstruct world position
                 float4 posWS = float4(ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP), 1.0);
@@ -391,27 +372,26 @@ Shader "Hidden/Sky/VolumetricClouds"
 
                 if (prevUV.x > 1.0 || prevUV.x < 0.0 || prevUV.y > 1.0 || prevUV.y < 0.0)
                 {
-                    // return 0 alpha to keep the color in render target.
-                    return half4(0.0, 0.0, 0.0, 0.0);
+                    return cloudsColor;
                 }
 
                 // Re-projected color from last frame.
-                half3 prevColor = SAMPLE_TEXTURE2D_X_LOD(_VolumetricCloudsHistoryTexture, s_point_clamp_sampler, prevUV, 0).rgb;
+                half4 previous = SAMPLE_TEXTURE2D_X_LOD(_VolumetricCloudsHistoryTexture, s_point_clamp_sampler, prevUV, 0).rgba;
 
                 // Can be replace by clamp() to reduce performance cost.
-                //prevColor.rgb = ClipToAABBCenter(prevColor.rgb, boxMin, boxMax);
-                prevColor.rgb = clamp(prevColor.rgb, boxMin, boxMax);
+                //previous.rgb = ClipToAABBCenter(previous.rgb, boxMin.rgb, boxMax.rgb);
+                previous = clamp(previous, boxMin, boxMax);
 
                 half intensity = saturate(min(_AccumulationFactor - (abs(velocity.x)) * _AccumulationFactor, _AccumulationFactor - (abs(velocity.y)) * _AccumulationFactor));
 
-                return half4(prevColor.rgb, intensity);
+                return lerp(cloudsColor, previous, intensity);
             }
             ENDHLSL
         }
 
         Pass
         {
-            Name "Volumetric Clouds Shadows"
+            Name "Volumetric Clouds - Shadow Trace"
             Tags { "LightMode" = "Volumetric Clouds" }
 
             Blend One Zero
@@ -453,7 +433,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
         Pass
         {
-            Name "Volumetric Clouds Shadows Filtering"
+            Name "Volumetric Clouds - Shadow Filter"
             Tags { "LightMode" = "Volumetric Clouds" }
 
             Blend One Zero
@@ -495,10 +475,11 @@ Shader "Hidden/Sky/VolumetricClouds"
 
         Pass
         {
-            Name "Volumetric Clouds Update Depth"
+            Name "Volumetric Clouds - Update Camera Depth"
             Tags { "LightMode" = "Volumetric Clouds" }
 
             ZWrite On
+            ZTest Always
             ColorMask R
             Blend One Zero
 			
@@ -549,7 +530,7 @@ Shader "Hidden/Sky/VolumetricClouds"
             // Compile this pass only when PBSky 1.0.0 or newer is available.
             PackageRequirements { "com.jiaozi158.unity-physically-based-sky-urp": "1.0.0" }
 
-            Name "Volumetric Clouds Combine PBSky"
+            Name "Volumetric Clouds - Combine with PBSky Scattering"
             Tags { "LightMode" = "Volumetric Clouds" }
 
             Blend One SrcAlpha, Zero One
@@ -662,7 +643,7 @@ Shader "Hidden/Sky/VolumetricClouds"
             // Compile this pass only when PBSky 1.0.0 or newer is available.
             PackageRequirements { "com.jiaozi158.unity-physically-based-sky-urp": "1.0.0" }
 
-            Name "Volumetric Clouds Update Environment"
+            Name "Volumetric Clouds - Update PBSky Environment"
             Tags { "LightMode" = "Volumetric Clouds" }
 
             Blend One SrcAlpha, Zero One

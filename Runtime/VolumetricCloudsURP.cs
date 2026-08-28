@@ -374,10 +374,11 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             volumetricCloudsPass.ConfigureInput(requiredInputs);
         #if URP_PBSKY
             Fog fog = stack.GetComponent<Fog>();
-            volumetricCloudsPass.hasAtmosphericScattering = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased && pbrSky != null && pbrSky.atmosphericScattering.value;
-            volumetricCloudsPass.hasAtmosphericScattering |= fog != null && fog.IsActive();
+            volumetricCloudsPass.hasPhysicallyBasedScattering = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased && pbrSky != null && pbrSky.atmosphericScattering.value;
+            volumetricCloudsPass.hasAtmosphericScattering = volumetricCloudsPass.hasPhysicallyBasedScattering || fog != null && fog.IsActive();
             volumetricCloudsPass.visualEnvVolume = visualEnvironment;
 #else
+            volumetricCloudsPass.hasPhysicallyBasedScattering = false;
             volumetricCloudsPass.hasAtmosphericScattering = false;
 #endif
 
@@ -473,6 +474,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         public bool outputDepth;
         public bool outputToSceneDepth;
         public bool sunAttenuation;
+        public bool hasPhysicallyBasedScattering;
         public bool hasAtmosphericScattering;
 
         private bool denoiseClouds;
@@ -1267,12 +1269,14 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             int combineShaderPass = combinePass;
 #if URP_PBSKY
             PBSkyFrameResources physicallyBasedSkyResources = frameData.GetOrCreate<PBSkyFrameResources>();
+            bool hasRequiredScatteringResources = !hasPhysicallyBasedScattering ||
+                (physicallyBasedSkyResources.airSingleScattering.IsValid() &&
+                physicallyBasedSkyResources.aerosolSingleScattering.IsValid() &&
+                physicallyBasedSkyResources.multipleScattering.IsValid());
             bool usePhysicallyBasedSkyCombine = hasAtmosphericScattering &&
                 physicallyBasedSkyCombineMaterial != null &&
                 physicallyBasedSkyCombinePass >= 0 &&
-                physicallyBasedSkyResources.airSingleScattering.IsValid() &&
-                physicallyBasedSkyResources.aerosolSingleScattering.IsValid() &&
-                physicallyBasedSkyResources.multipleScattering.IsValid();
+                hasRequiredScatteringResources;
             if (usePhysicallyBasedSkyCombine)
             {
                 combineMaterial = physicallyBasedSkyCombineMaterial;
@@ -1327,9 +1331,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #if URP_PBSKY
                 if (selectedPhysicallyBasedSkyCombine)
                 {
-                    builder.UseTexture(data.airSingleScattering, AccessFlags.Read);
-                    builder.UseTexture(data.aerosolSingleScattering, AccessFlags.Read);
-                    builder.UseTexture(data.multipleScattering, AccessFlags.Read);
+                    if (data.airSingleScattering.IsValid()) builder.UseTexture(data.airSingleScattering, AccessFlags.Read);
+                    if (data.aerosolSingleScattering.IsValid()) builder.UseTexture(data.aerosolSingleScattering, AccessFlags.Read);
+                    if (data.multipleScattering.IsValid()) builder.UseTexture(data.multipleScattering, AccessFlags.Read);
                     if (data.fogSky.IsValid()) builder.UseTexture(data.fogSky, AccessFlags.Read);
                 }
 #endif

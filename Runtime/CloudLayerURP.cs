@@ -93,6 +93,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         internal static readonly int AirSingleScatteringTexture = Shader.PropertyToID("_AirSingleScatteringTexture");
         internal static readonly int AerosolSingleScatteringTexture = Shader.PropertyToID("_AerosolSingleScatteringTexture");
         internal static readonly int MultipleScatteringTexture = Shader.PropertyToID("_MultipleScatteringTexture");
+        internal static readonly int FogSkyTexture = Shader.PropertyToID("_FogSkyTexture");
 #endif
     }
 
@@ -132,7 +133,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         };
         _renderPass = new CloudLayerRenderPass(_material, _physicallyBasedSkyMaterial, _resources)
         {
-            renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1,
+            // PBSky fogs opaque geometry and publishes its per-camera globals one event earlier.
+            renderPassEvent = RenderPassEvent.BeforeRenderingTransparents,
         };
         _missingResourcesLogged = false;
     }
@@ -214,22 +216,26 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
 #endif
         bool isProbeCamera = cameraType == CameraType.Reflection;
         bool physicallyBasedScattering = false;
+        bool fogEnabled = false;
 #if URP_PBSKY
         VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
         PhysicallyBasedSky physicallyBasedSky = stack.GetComponent<PhysicallyBasedSky>();
+        Fog fog = stack.GetComponent<Fog>();
         physicallyBasedScattering = visualEnvironment != null &&
             visualEnvironment.IsActive() &&
             visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased &&
             physicallyBasedSky != null &&
             physicallyBasedSky.IsActive() &&
             physicallyBasedSky.atmosphericScattering.value;
+        fogEnabled = fog != null && fog.IsActive();
 #endif
         _renderPass.Setup(
             cloudLayer,
             cloudLayer.CastShadows && supportsCookies,
             _sunAttenuation,
             dynamicAmbientProbe,
-            physicallyBasedScattering);
+            physicallyBasedScattering,
+            fogEnabled);
 
 #if VC_AMBIENT
         if (dynamicAmbientProbe && !isProbeCamera)
@@ -756,6 +762,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         private CloudLayer _cloudLayer;
         private bool _shadowsEnabled;
         private bool _physicallyBasedScattering;
+        private bool _fogEnabled;
 
         internal CloudLayerRenderPass(Material material, Material physicallyBasedSkyMaterial, CloudLayerResources resources)
         {
@@ -773,11 +780,13 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             bool shadowsEnabled,
             bool sunAttenuation,
             bool dynamicAmbientProbe,
-            bool physicallyBasedScattering)
+            bool physicallyBasedScattering,
+            bool fogEnabled)
         {
             _cloudLayer = cloudLayer;
             _shadowsEnabled = shadowsEnabled;
             _physicallyBasedScattering = physicallyBasedScattering;
+            _fogEnabled = fogEnabled;
             CoreUtils.SetKeyword(_material, "_PHYSICALLY_BASED_SUN", sunAttenuation);
             CoreUtils.SetKeyword(_material, "_CLOUDS_AMBIENT_PROBE", dynamicAmbientProbe);
             if (_physicallyBasedSkyCombineMaterial != null &&
@@ -812,20 +821,22 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             int combinePass = 0;
 #if URP_PBSKY
             PBSkyFrameResources physicallyBasedSkyResources = frameData.GetOrCreate<PBSkyFrameResources>();
-            bool usePhysicallyBasedSkyPass = _physicallyBasedScattering &&
+            bool hasScatteringResources = !_physicallyBasedScattering ||
+                (physicallyBasedSkyResources.airSingleScattering.IsValid() &&
+                physicallyBasedSkyResources.aerosolSingleScattering.IsValid() &&
+                physicallyBasedSkyResources.multipleScattering.IsValid());
+            bool usePhysicallyBasedSkyPass = (_physicallyBasedScattering || _fogEnabled) &&
                 _physicallyBasedSkyCombineMaterial != null &&
                 _physicallyBasedSkyPass >= 0 &&
-                physicallyBasedSkyResources.airSingleScattering.IsValid() &&
-                physicallyBasedSkyResources.aerosolSingleScattering.IsValid() &&
-                physicallyBasedSkyResources.multipleScattering.IsValid();
+                hasScatteringResources;
             if (usePhysicallyBasedSkyPass)
             {
                 combineMaterial = _physicallyBasedSkyCombineMaterial;
                 combinePass = _physicallyBasedSkyPass;
             }
-            else if (_physicallyBasedScattering && !_missingPhysicallyBasedSkyPassLogged)
+            else if ((_physicallyBasedScattering || _fogEnabled) && !_missingPhysicallyBasedSkyPassLogged)
             {
-                Debug.LogWarning($"Cloud Layer URP: PBSky shader pass '{PhysicallyBasedSkyCombinePassName}' or its frame resources are unavailable. Atmospheric scattering will not affect cloud layers; using the standard combine pass instead.");
+                Debug.LogWarning($"Cloud Layer URP: PBSky shader pass '{PhysicallyBasedSkyCombinePassName}' or its required frame resources are unavailable. Atmospheric scattering and fog will not affect cloud layers; using the standard combine pass instead.");
                 _missingPhysicallyBasedSkyPassLogged = true;
             }
 #endif
@@ -885,6 +896,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
                     passData.airSingleScattering = physicallyBasedSkyResources.airSingleScattering;
                     passData.aerosolSingleScattering = physicallyBasedSkyResources.aerosolSingleScattering;
                     passData.multipleScattering = physicallyBasedSkyResources.multipleScattering;
+                    passData.fogSky = physicallyBasedSkyResources.fogSky;
                 }
 #endif
 
@@ -895,9 +907,14 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
 #if URP_PBSKY
                 if (usePhysicallyBasedSkyPass)
                 {
-                    builder.UseTexture(passData.airSingleScattering, AccessFlags.Read);
-                    builder.UseTexture(passData.aerosolSingleScattering, AccessFlags.Read);
-                    builder.UseTexture(passData.multipleScattering, AccessFlags.Read);
+                    if (passData.airSingleScattering.IsValid())
+                        builder.UseTexture(passData.airSingleScattering, AccessFlags.Read);
+                    if (passData.aerosolSingleScattering.IsValid())
+                        builder.UseTexture(passData.aerosolSingleScattering, AccessFlags.Read);
+                    if (passData.multipleScattering.IsValid())
+                        builder.UseTexture(passData.multipleScattering, AccessFlags.Read);
+                    if (passData.fogSky.IsValid())
+                        builder.UseTexture(passData.fogSky, AccessFlags.Read);
                     builder.AllowGlobalStateModification(true);
                     builder.UseAllGlobalTextures(true);
                 }
@@ -937,6 +954,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
                         context.cmd.SetGlobalTexture(ShaderIds.AerosolSingleScatteringTexture, data.aerosolSingleScattering);
                     if (data.multipleScattering.IsValid())
                         context.cmd.SetGlobalTexture(ShaderIds.MultipleScatteringTexture, data.multipleScattering);
+                    if (data.fogSky.IsValid())
+                        context.cmd.SetGlobalTexture(ShaderIds.FogSkyTexture, data.fogSky);
 #endif
                     context.cmd.DrawProcedural(
                         Matrix4x4.identity,
@@ -995,6 +1014,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             internal TextureHandle airSingleScattering;
             internal TextureHandle aerosolSingleScattering;
             internal TextureHandle multipleScattering;
+            internal TextureHandle fogSky;
 #endif
         }
     }

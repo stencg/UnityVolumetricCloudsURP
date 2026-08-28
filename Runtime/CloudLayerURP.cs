@@ -178,15 +178,6 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         }
 
         _renderPass.Setup(cloudLayer, cloudLayer.CastShadows && supportsCookies, _sunAttenuation);
-#if URP_PBSKY
-        VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
-        PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
-        bool useStaticPbrSkyAmbientProbe = visualEnvironment != null && visualEnvironment.IsActive() &&
-            visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased &&
-            visualEnvironment.skyAmbientMode.value == VisualEnvironment.SkyAmbientMode.Static &&
-            pbrSky != null && pbrSky.IsActive();
-        _renderPass.SetupAmbientProbe(pbrSky, visualEnvironment, useStaticPbrSkyAmbientProbe);
-#endif
         renderer.EnqueuePass(_renderPass);
     }
 
@@ -690,14 +681,6 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         private readonly CloudLayerResources _resources;
         private CloudLayer _cloudLayer;
         private bool _shadowsEnabled;
-#if URP_PBSKY
-        private PhysicallyBasedSky _pbrSky;
-        private VisualEnvironment _visualEnvironment;
-        private bool _useStaticPbrSkyAmbientProbe;
-        private bool _staticPbrSkyAmbientProbeInitialized;
-        private string _staticPbrSkyAmbientProbeScenePath;
-        private SphericalHarmonicsL2 _staticPbrSkyAmbientProbe;
-#endif
 
         internal CloudLayerRenderPass(Material material, CloudLayerResources resources)
         {
@@ -712,18 +695,6 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             _shadowsEnabled = shadowsEnabled;
             CoreUtils.SetKeyword(_material, "_PHYSICALLY_BASED_SUN", sunAttenuation);
         }
-
-#if URP_PBSKY
-        internal void SetupAmbientProbe(PhysicallyBasedSky pbrSky, VisualEnvironment visualEnvironment, bool useStaticPbrSkyAmbientProbe)
-        {
-            _pbrSky = pbrSky;
-            _visualEnvironment = visualEnvironment;
-            _useStaticPbrSkyAmbientProbe = useStaticPbrSkyAmbientProbe;
-
-            if (!useStaticPbrSkyAmbientProbe)
-                _staticPbrSkyAmbientProbeInitialized = false;
-        }
-#endif
 
         /// <summary>
         /// Записывает полноэкранную композицию Cloud Layer в RenderGraph.
@@ -741,26 +712,6 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             Light sunLight = GetMainLight(lightData, out Color sunColor);
 
             SphericalHarmonicsL2 ambientProbe = RenderSettings.ambientProbe;
-#if URP_PBSKY
-            if (_useStaticPbrSkyAmbientProbe)
-            {
-                Camera ambientCamera = cameraData.camera;
-                if (cameraData.camera.cameraType == CameraType.Game && _staticPbrSkyAmbientProbeScenePath != ambientCamera.gameObject.scene.path)
-                {
-                    _staticPbrSkyAmbientProbeInitialized = false;
-                    _staticPbrSkyAmbientProbeScenePath = ambientCamera.gameObject.scene.path;
-                }
-
-                if (!_staticPbrSkyAmbientProbeInitialized && sunLight != null)
-                {
-                    _staticPbrSkyAmbientProbe = PhysicallyBasedSkyURP.EvaluateAmbientProbe(_pbrSky, _visualEnvironment, sunLight, ambientCamera.transform.position);
-                    _staticPbrSkyAmbientProbeInitialized = true;
-                }
-
-                if (_staticPbrSkyAmbientProbeInitialized)
-                    ambientProbe = _staticPbrSkyAmbientProbe;
-            }
-#endif
 
             _resources.Prepare(_cloudLayer, sunLight, cameraData.camera, _shadowsEnabled);
             TextureHandle cloudTexture = _resources.RecordCloudTextureBake(renderGraph, _cloudLayer, sunLight);

@@ -10,6 +10,12 @@
 TEXTURE2D_ARRAY(_CloudTexture);
 SAMPLER(sampler_CloudTexture);
 
+TEXTURE2D(_CloudMapA);
+SAMPLER(sampler_CloudMapA);
+
+TEXTURE2D(_CloudMapB);
+SAMPLER(sampler_CloudMapB);
+
 TEXTURE2D(_FlowmapA);
 SAMPLER(sampler_FlowmapA);
 
@@ -21,6 +27,9 @@ SAMPLER(sampler_VolumetricCloudsAmbientProbe);
 
 float4 _FlowmapParamA;
 float4 _FlowmapParamB;
+float4 _CloudMapOpacityA;
+float4 _CloudMapOpacityB;
+float2 _CloudMapRotations;
 float4 _LayerModes;
 float4 _LayerEnabled;
 float4 _CloudLayerParamsA;
@@ -150,7 +159,29 @@ float2 CloudLayerSampleMap(float3 direction, int layerIndex)
 {
     bool upperHemisphereOnly = _FlowmapParamA.w != 0.0;
     float2 uv = CloudLayerGetLatLongCoords(direction, upperHemisphereOnly);
+
+#ifdef _CLOUD_LAYER_DIRECT_MAPS
+    float4 opacityWeights = 0.0;
+    float4 mapValue = 0.0;
+    if (layerIndex == 0)
+    {
+        opacityWeights = _CloudMapOpacityA;
+        uv.x -= _CloudMapRotations.x;
+        mapValue = SAMPLE_TEXTURE2D_LOD(_CloudMapA, sampler_CloudMapA, uv, 0);
+    }
+    else
+    {
+        opacityWeights = _CloudMapOpacityB;
+        uv.x -= _CloudMapRotations.y;
+        mapValue = SAMPLE_TEXTURE2D_LOD(_CloudMapB, sampler_CloudMapB, uv, 0);
+    }
+
+    opacityWeights *= rcp(max(dot(opacityWeights, 1.0), 1.0));
+    float opacity = dot(mapValue, opacityWeights);
+    return opacity.xx;
+#else
     return SAMPLE_TEXTURE2D_ARRAY_LOD(_CloudTexture, sampler_CloudTexture, uv, layerIndex, 0).rg;
+#endif
 }
 
 float2 CloudLayerSampleFlowmap(float3 direction, int layerIndex)

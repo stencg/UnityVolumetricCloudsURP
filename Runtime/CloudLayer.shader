@@ -25,6 +25,7 @@ Shader "Hidden/Sky/CloudLayerURP"
             #pragma multi_compile_instancing
             #pragma multi_compile_local_fragment _ _PHYSICALLY_BASED_SUN
             #pragma multi_compile_local_fragment _ _CLOUDS_AMBIENT_PROBE
+            #pragma multi_compile_local_fragment _ _CLOUD_LAYER_DIRECT_MAPS
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"

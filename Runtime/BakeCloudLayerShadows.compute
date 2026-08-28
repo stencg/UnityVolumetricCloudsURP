@@ -1,5 +1,6 @@
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 #pragma kernel BakeCloudShadows
+#pragma multi_compile _ _CLOUD_LAYER_DIRECT_MAPS
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.jiaozi158.unity-volumetric-clouds-urp/Runtime/CloudLayerCommon.hlsl"

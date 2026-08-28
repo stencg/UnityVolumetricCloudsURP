@@ -14,6 +14,9 @@ SAMPLER(sampler_FlowmapA);
 TEXTURE2D(_FlowmapB);
 SAMPLER(sampler_FlowmapB);
 
+TEXTURECUBE(_VolumetricCloudsAmbientProbe);
+SAMPLER(sampler_VolumetricCloudsAmbientProbe);
+
 float4 _FlowmapParamA;
 float4 _FlowmapParamB;
 float4 _LayerModes;
@@ -123,8 +126,16 @@ float3 CloudLayerRotationUp(float3 direction, float2 cosineSine)
 
 float3 CloudLayerEvaluateAmbient(float3 normalWS)
 {
+#ifdef _CLOUDS_AMBIENT_PROBE
+    float3 result = SAMPLE_TEXTURECUBE_LOD(
+        _VolumetricCloudsAmbientProbe,
+        sampler_VolumetricCloudsAmbientProbe,
+        normalWS,
+        4.0).rgb;
+#else
     float3 result = SHEvalLinearL0L1(normalWS, _CloudLayerSHAr, _CloudLayerSHAg, _CloudLayerSHAb);
     result += SHEvalLinearL2(normalWS, _CloudLayerSHBr, _CloudLayerSHBg, _CloudLayerSHBb, _CloudLayerSHC);
+#endif
 
 #ifdef UNITY_COLORSPACE_GAMMA
     result = LinearToSRGB(result);

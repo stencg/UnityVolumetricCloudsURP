@@ -23,6 +23,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     [SerializeField] private bool _reflectionProbe;
 
     [Header("Lighting")]
+    [Tooltip("Specifies the cloud layer ambient lighting source. Static uses RenderSettings.ambientProbe, including the probe published by Physically Based Sky URP. Dynamic uses a fast 16x16 cubemap and requires the VC_AMBIENT scripting define; otherwise Static is used.")]
+    [SerializeField] private CloudsAmbientMode _ambientProbe = CloudsAmbientMode.Static;
     [Tooltip("Specifies if URP calculates physically based sun attenuation for cloud layers.")]
     [SerializeField] private bool _sunAttenuation;
 
@@ -30,9 +32,19 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     private CloudLayerResources _resources;
     private CloudLayerRenderPass _renderPass;
     private CloudLayerShadowPass _shadowPass;
+    private VolumetricCloudsURP.VolumetricCloudsAmbientPass _ambientPass;
     private bool _missingResourcesLogged;
     private bool _unsupportedCookiesLogged;
     private static bool _compatibilityModeErrorLogged;
+
+    public enum CloudsAmbientMode
+    {
+        [Tooltip("Use RenderSettings.ambientProbe for cloud layer rendering, including the probe published by Physically Based Sky URP.")]
+        Static,
+
+        [Tooltip("Use a fast dynamic 16x16 cubemap. Requires the VC_AMBIENT scripting define; otherwise Static is used.")]
+        Dynamic,
+    }
 
     private static class ShaderIds
     {
@@ -85,6 +97,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
 #endif
 
         _resources?.Dispose();
+        _ambientPass?.Dispose();
+        _ambientPass = null;
         CoreUtils.Destroy(_material);
 
         _material = _cloudLayerShader != null ? CoreUtils.CreateEngineMaterial(_cloudLayerShader) : null;
@@ -177,7 +191,29 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             _unsupportedCookiesLogged = true;
         }
 
-        _renderPass.Setup(cloudLayer, cloudLayer.CastShadows && supportsCookies, _sunAttenuation);
+#if VC_AMBIENT
+        bool dynamicAmbientProbe = _ambientProbe == CloudsAmbientMode.Dynamic;
+#else
+        bool dynamicAmbientProbe = false;
+#endif
+        bool isProbeCamera = cameraType == CameraType.Reflection;
+        _renderPass.Setup(cloudLayer, cloudLayer.CastShadows && supportsCookies, _sunAttenuation, dynamicAmbientProbe);
+
+#if VC_AMBIENT
+        if (dynamicAmbientProbe && !isProbeCamera)
+        {
+            if (_ambientPass == null)
+            {
+                _ambientPass = new VolumetricCloudsURP.VolumetricCloudsAmbientPass(_material)
+                {
+                    renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1,
+                };
+            }
+
+            renderer.EnqueuePass(_ambientPass);
+        }
+#endif
+
         renderer.EnqueuePass(_renderPass);
     }
 
@@ -189,6 +225,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     {
         _resources?.Dispose();
         _resources = null;
+        _ambientPass?.Dispose();
+        _ambientPass = null;
         CoreUtils.Destroy(_material);
         _material = null;
     }
@@ -689,11 +727,12 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             ConfigureInput(ScriptableRenderPassInput.Depth);
         }
 
-        internal void Setup(CloudLayer cloudLayer, bool shadowsEnabled, bool sunAttenuation)
+        internal void Setup(CloudLayer cloudLayer, bool shadowsEnabled, bool sunAttenuation, bool dynamicAmbientProbe)
         {
             _cloudLayer = cloudLayer;
             _shadowsEnabled = shadowsEnabled;
             CoreUtils.SetKeyword(_material, "_PHYSICALLY_BASED_SUN", sunAttenuation);
+            CoreUtils.SetKeyword(_material, "_CLOUDS_AMBIENT_PROBE", dynamicAmbientProbe);
         }
 
         /// <summary>

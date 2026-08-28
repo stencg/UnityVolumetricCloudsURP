@@ -38,7 +38,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     [SerializeField] private bool depthAwareEdgeFilterDebug = false;
 
     [Header("Lighting")]
-    [Tooltip("Specifies the volumetric clouds ambient probe update frequency. Dynamic requires the VC_AMBIENT scripting define, unless Physically Based Sky URP provides an active dynamic sky ambient probe; otherwise Static is used.")]
+    [Tooltip("Specifies the volumetric clouds ambient lighting source. Static uses RenderSettings.ambientProbe, including the probe published by Physically Based Sky URP. Dynamic uses a fast 16x16 cubemap and requires the VC_AMBIENT scripting define; otherwise Static is used.")]
     [SerializeField] private CloudsAmbientMode ambientProbe = CloudsAmbientMode.Static;
     [Tooltip("Specifies if URP calculates physically based sun attenuation for volumetric clouds.")]
     [SerializeField] private bool sunAttenuation = false;
@@ -56,7 +56,6 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
     private const string shaderName = "Hidden/Sky/VolumetricClouds";
     private const string VOLUMETRIC_CLOUDS = "VOLUMETRIC_CLOUDS";
-    private const string VISUAL_ENVIRONMENT_DYNAMIC_SKY = "VISUAL_ENVIRONMENT_DYNAMIC_SKY";
     private VolumetricCloudsPass volumetricCloudsPass;
     private VolumetricCloudsAmbientPass volumetricCloudsAmbientPass;
     private VolumetricCloudsShadowsPass volumetricCloudsShadowsPass;
@@ -197,10 +196,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
     public enum CloudsAmbientMode
     {
-        [Tooltip("Use URP default static ambient probe for volumetric clouds rendering.")]
+        [Tooltip("Use RenderSettings.ambientProbe for volumetric clouds rendering, including the probe published by Physically Based Sky URP.")]
         Static,
 
-        [Tooltip("Use a fast dynamic ambient probe. Requires the VC_AMBIENT scripting define, unless Physically Based Sky URP provides an active dynamic sky ambient probe; otherwise Static is used.")]
+        [Tooltip("Use a fast dynamic 16x16 cubemap. Requires the VC_AMBIENT scripting define; otherwise Static is used.")]
         Dynamic
     }
 
@@ -348,18 +347,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         #if URP_PBSKY
             VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
             PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
-
-            // Use PBSky's ambient probe when it is already updating dynamically.
-            bool isDynamicPbrSky = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyAmbientMode.value == VisualEnvironment.SkyAmbientMode.Dynamic && Shader.IsKeywordEnabled(VISUAL_ENVIRONMENT_DYNAMIC_SKY);
-#if VC_AMBIENT
-            bool dynamicAmbientProbe = !isDynamicPbrSky && ambientProbe == CloudsAmbientMode.Dynamic;
-#else
-            // Without the custom ambient pass, only an active dynamic PBSky probe can update ambient lighting.
-            bool dynamicAmbientProbe = false;
-#endif
-            bool trackStaticAmbientProbe = !dynamicAmbientProbe && !isDynamicPbrSky;
-            bool updateAmbientProbe = dynamicAmbientProbe;
-        #else
+        #endif
 #if VC_AMBIENT
             bool dynamicAmbientProbe = ambientProbe == CloudsAmbientMode.Dynamic;
 #else
@@ -367,7 +355,6 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #endif
             bool trackStaticAmbientProbe = !dynamicAmbientProbe;
             bool updateAmbientProbe = dynamicAmbientProbe;
-        #endif
             volumetricCloudsPass.cloudsVolume = cloudsVolume;
             volumetricCloudsPass.colorAdjustments = colorAdjustments;
             volumetricCloudsPass.dynamicAmbientProbe = dynamicAmbientProbe;

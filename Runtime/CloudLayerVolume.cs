@@ -181,7 +181,7 @@ public sealed class CloudLayer : VolumeComponent, IPostProcessComponent
 
         /// <summary>Множитель освещения от ambient probe.</summary>
         [Tooltip("Controls the influence of the ambient probe on the cloud layer.")]
-        public ClampedFloatParameter ambientProbeDimmer = new(1.0f, 0.0f, 1.0f);
+        public ClampedFloatParameter ambientProbeDimmer = new(1.0f, 0.0f, 2.0f);
 
         /// <summary>Включает проекцию теней от слоя.</summary>
         [Tooltip("Projects cloud shadows and overrides the main directional light cookie for the current camera.")]

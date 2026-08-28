@@ -1,5 +1,10 @@
 Shader "Hidden/Sky/CloudLayerURP"
 {
+    Properties
+    {
+        [HideInInspector] _VolumetricCloudsAmbientProbe("Ambient Probe", CUBE) = "grey" {}
+    }
+
     SubShader
     {
         Tags { "RenderPipeline" = "UniversalPipeline" }
@@ -19,6 +24,7 @@ Shader "Hidden/Sky/CloudLayerURP"
             #pragma fragment Frag
             #pragma multi_compile_instancing
             #pragma multi_compile_local_fragment _ _PHYSICALLY_BASED_SUN
+            #pragma multi_compile_local_fragment _ _CLOUDS_AMBIENT_PROBE
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"

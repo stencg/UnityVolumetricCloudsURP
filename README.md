@@ -35,7 +35,11 @@ Cloud Layer setup
 2. Add **Cloud Layer (URP)** to a Volume profile and enable **State**.
 3. Assign a latitude-longitude cloud map to Layer A (and Layer B when using Double mode).
 
-Cloud Layer is implemented with Unity 6 RenderGraph only. Its shadow option uses the main directional-light cookie, so **Light Cookies** must be enabled in the active URP asset.
+Cloud Layer renderer feature's **Ambient Probe**
+mode follows the same rules as Volumetric Clouds: **Static** copies `RenderSettings.ambientProbe`,
+including the probe published by PBR sky; with `VC_AMBIENT` enabled, **Dynamic** uses a 16x16
+ambient cubemap rendered from the current skybox. Its shadow option uses the main directional-light
+cookie, so **Light Cookies** must be enabled in the active URP asset.
  
 Requirements
 ------------
@@ -68,7 +72,7 @@ Some features are gated behind C# preprocessor defines. Add the ones you want to
 | `VC_SHADOWS` | Off | Enables the **VolumetricCloudsShadowsPass**, which bakes volumetric cloud shadows into the main directional light's cookie so clouds cast shadows onto the scene. Requires **Light Cookies** to be enabled in the active URP asset (the cookie of the main directional light is overridden). |
 | `VC_DENOISE` | Off | Enables **temporal reprojection denoising** for single-sample cloud lighting and transmittance before they are combined with camera color. When active and `Denoise Clouds` is enabled, it uses per-camera ping-pong history for a smoother, more stable result at low resolution scales. |
 | `VC_DEPTH` | Off | Enables **depth** handling: reading the camera depth texture, outputting the clouds average depth to the global `_VolumetricCloudsDepthTexture`, and (when *Output To Scene Depth* is on) writing the clouds depth back into `_CameraDepthTexture`. Required for any depth-based cloud feature. |
-| `VC_AMBIENT` | Off | Enables the **VolumetricCloudsAmbientPass**, which renders a dynamic ambient probe (cube map) used for clouds ambient lighting. |
+| `VC_AMBIENT` | Off | Enables the dynamic 16x16 ambient cubemap path used when the Volumetric Clouds or Cloud Layer renderer feature's ambient mode is **Dynamic**. |
 | `OPTIMISATION` | Off | Enables performance optimizations: `[BurstCompile]` on math jobs (when Burst is present), `NativeArray`/`GetRawTextureData` instead of managed `Color[]` arrays, and `AggressiveInlining` on hot helpers. |
 | `_CONST_EARTH_RADIUS` | Off | Treats the Earth radius as a compile-time `const` (skipping the per-material `_EarthRadius` property lookup) and marks the dependent functions `static`. Use only when the Earth radius is always the default value; disable it when the radius can be changed at runtime (e.g. via Physically Based Sky). |
 | `UNUSED` | Off | Keeps currently-dead/experimental code paths compiled in (e.g. `SetGlobalTextureAfterPass` calls, the `PowderEffect` function and the standalone ray-sphere intersection helper). Leave it off for normal builds to strip unused code. |
@@ -76,17 +80,14 @@ Some features are gated behind C# preprocessor defines. Add the ones you want to
 > The default column reflects the *recommended* state when you first install the package;
 > none of these are set automatically, so add them explicitly.
 
-> **`VC_AMBIENT` with Physically Based Sky URP:** The cloud renderer feature's **Dynamic**
-> ambient mode and the Visual Environment ambient mode are independent. When Visual Environment
-> is **Dynamic**, clouds use the PBR sky's spherical-harmonics probe and skip the additional
-> `VC_AMBIENT` pass. When Visual Environment is **Static** but the cloud renderer is **Dynamic**,
-> clouds instead use the 16x16 `VC_AMBIENT` cubemap (sampled from a filtered mip), so a small
-> brightness or color difference between the two Visual Environment modes is expected. For the
-> closest match and lower cost with PBR sky, set the cloud renderer's ambient mode to **Static**;
-> PBR sky supplies the appropriate spherical harmonics in both Visual Environment modes. The
-> dynamic `VC_AMBIENT` path is primarily useful with non-PBR or custom skies. Diffuse object
-> lighting should still match between PBR sky modes, while specular lighting may differ because
-> Dynamic uses a runtime reflection cubemap and Static uses the baked/default environment reflection.
+> **`VC_AMBIENT` with Physically Based Sky URP:** The cloud renderer feature's ambient mode
+> selects the cloud lighting source independently of the Visual Environment ambient mode.
+> **Static** copies `RenderSettings.ambientProbe`, including the spherical-harmonics probe
+> published by PBR sky. With `VC_AMBIENT` enabled, **Dynamic** always uses the 16x16 ambient
+> cubemap (sampled from a filtered mip), even when the Visual Environment is Dynamic. A small
+> brightness or color difference between Static and Dynamic is therefore expected. Static is the
+> closest match and lower-cost option with PBR sky; Dynamic is useful when clouds should track the
+> rendered skybox directly, especially with non-PBR or custom skies.
 
 ### Automatically defined (via `versionDefines` in the `.asmdef`)
 

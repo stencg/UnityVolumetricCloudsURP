@@ -5,6 +5,8 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SphericalHarmonics.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
 
+#define CLOUD_LAYER_OPACITY_EPSILON 1e-4
+
 TEXTURE2D_ARRAY(_CloudTexture);
 SAMPLER(sampler_CloudTexture);
 
@@ -32,12 +34,12 @@ float4 _CloudLayerSHBg;
 float4 _CloudLayerSHBb;
 float4 _CloudLayerSHC;
 float3 _SunDirection;
-float _PlanetaryRadius;
+float _CloudLayerPlanetaryRadius;
 
 #ifdef _PHYSICALLY_BASED_SUN
 float CloudLayerComputeCosineOfHorizonAngle(float radialDistance)
 {
-    float sinHorizon = _PlanetaryRadius / radialDistance;
+    float sinHorizon = _CloudLayerPlanetaryRadius / radialDistance;
     return -sqrt(saturate(1.0 - sinHorizon * sinHorizon));
 }
 
@@ -60,7 +62,7 @@ float3 CloudLayerComputeAtmosphericOpticalDepth(float radialDistance, float cosT
     const float2 scaleHeight = float2(8000.0, 1200.0);
     const float2 densityFalloff = rcp(scaleHeight);
     float2 z = densityFalloff * radialDistance;
-    float2 planetZ = densityFalloff * _PlanetaryRadius;
+    float2 planetZ = densityFalloff * _CloudLayerPlanetaryRadius;
     float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
     float2 chapman;
     chapman.x = CloudLayerChapmanUpperApprox(z.x, abs(cosTheta)) * exp(planetZ.x - z.x);
@@ -85,7 +87,7 @@ float3 CloudLayerEvaluateSunColorAttenuation(float3 positionPS, float3 sunDirect
 {
     float radialDistance = length(positionPS);
     float cosTheta = dot(positionPS, sunDirection) / radialDistance;
-    radialDistance = max(radialDistance, _PlanetaryRadius);
+    radialDistance = max(radialDistance, _CloudLayerPlanetaryRadius);
     float cosHorizon = CloudLayerComputeCosineOfHorizonAngle(radialDistance);
 
     if (cosTheta < cosHorizon)
@@ -162,7 +164,7 @@ float2 CloudLayerSampleFlowmap(float3 direction, int layerIndex)
     return SAMPLE_TEXTURE2D_LOD(_FlowmapB, sampler_FlowmapB, uv, 0).rg;
 }
 
-float4 CloudLayerRenderSingle(float3 direction, int layerIndex)
+float4 CloudLayerRenderSingle(float3 direction, int layerIndex, out float distanceToLayer)
 {
     float4 flowParameters = layerIndex == 0 ? _FlowmapParamA : _FlowmapParamB;
     float4 layerParameters = layerIndex == 0 ? _CloudLayerParamsA : _CloudLayerParamsB;
@@ -170,10 +172,10 @@ float4 CloudLayerRenderSingle(float3 direction, int layerIndex)
     int distortionMode = layerIndex == 0 ? (int)_LayerModes.x : (int)_LayerModes.y;
     float altitude = layerParameters.w;
 
-    float distanceToLayer = CloudLayerIntersectSphere(
-        altitude + _PlanetaryRadius,
+    distanceToLayer = CloudLayerIntersectSphere(
+        altitude + _CloudLayerPlanetaryRadius,
         direction.y,
-        _PlanetaryRadius).y;
+        _CloudLayerPlanetaryRadius).y;
     float3 position = direction * max(distanceToLayer, 0.0);
     float2 cloud;
 
@@ -209,31 +211,48 @@ float4 CloudLayerRenderSingle(float3 direction, int layerIndex)
 
     float3 directLighting = cloud.x * layerParameters.xyz;
 #ifdef _PHYSICALLY_BASED_SUN
-    float3 positionPS = position + float3(0.0, _PlanetaryRadius, 0.0);
+    float3 positionPS = position + float3(0.0, _CloudLayerPlanetaryRadius, 0.0);
     directLighting *= CloudLayerEvaluateSunColorAttenuation(positionPS, _SunDirection);
 #endif
     float3 ambient = max(CloudLayerEvaluateAmbient(float3(0.0, -1.0, 0.0)), 0.0) * ambientDimmer;
     return float4(directLighting + ambient * cloud.y, cloud.y) * _FlowmapParamB.w;
 }
 
-float4 CloudLayerRender(float3 direction)
+float4 CloudLayerRender(float3 direction, out float effectiveDistance)
 {
     float4 clouds = 0.0;
+    float weightedDistance = 0.0;
     bool upperHemisphereOnly = _FlowmapParamA.w != 0.0;
 
     if (direction.y >= 0.0 || !upperHemisphereOnly)
     {
         if (_LayerEnabled.x != 0.0)
-            clouds = CloudLayerRenderSingle(direction, 0);
+        {
+            float firstDistance;
+            clouds = CloudLayerRenderSingle(direction, 0, firstDistance);
+            weightedDistance = clouds.a * firstDistance;
+        }
 
         if (_LayerEnabled.y != 0.0)
         {
-            float4 secondLayer = CloudLayerRenderSingle(direction, 1);
+            float secondDistance;
+            float4 secondLayer = CloudLayerRenderSingle(direction, 1, secondDistance);
+            float secondWeight = (1.0 - clouds.a) * secondLayer.a;
             clouds += secondLayer * (1.0 - clouds.a);
+            weightedDistance += secondWeight * secondDistance;
         }
     }
 
+    effectiveDistance = clouds.a > CLOUD_LAYER_OPACITY_EPSILON
+        ? weightedDistance * rcp(clouds.a)
+        : 0.0;
     return clouds;
+}
+
+float4 CloudLayerRender(float3 direction)
+{
+    float effectiveDistance;
+    return CloudLayerRender(direction, effectiveDistance);
 }
 
 #endif

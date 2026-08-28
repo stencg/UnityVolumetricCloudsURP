@@ -14,6 +14,8 @@ using UnityEditor;
 public sealed class CloudLayerURP : ScriptableRendererFeature
 {
     private const string PackagePath = "Packages/com.jiaozi158.unity-volumetric-clouds-urp/";
+    private const string PhysicallyBasedSkyShaderName = "Hidden/Sky/PhysicallyBasedSkyPrecomputation";
+    private const string PhysicallyBasedSkyCombinePassName = "Cloud Layer - Combine with PBSky Scattering";
 
     [Header("Setup")]
     [Reload("Runtime/CloudLayer.shader"), SerializeField] private Shader _cloudLayerShader;
@@ -29,12 +31,14 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
     [SerializeField] private bool _sunAttenuation;
 
     private Material _material;
+    private Material _physicallyBasedSkyMaterial;
     private CloudLayerResources _resources;
     private CloudLayerRenderPass _renderPass;
     private CloudLayerShadowPass _shadowPass;
     private VolumetricCloudsURP.VolumetricCloudsAmbientPass _ambientPass;
     private bool _missingResourcesLogged;
     private bool _unsupportedCookiesLogged;
+    private static bool _missingPhysicallyBasedSkyPassLogged;
     private static bool _compatibilityModeErrorLogged;
 
     public enum CloudsAmbientMode
@@ -69,7 +73,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         internal static readonly int CloudLayerParamsB = Shader.PropertyToID("_CloudLayerParamsB");
         internal static readonly int AmbientParams = Shader.PropertyToID("_AmbientParams");
         internal static readonly int SunDirection = Shader.PropertyToID("_SunDirection");
-        internal static readonly int PlanetaryRadius = Shader.PropertyToID("_PlanetaryRadius");
+        internal static readonly int PlanetaryRadius = Shader.PropertyToID("_CloudLayerPlanetaryRadius");
         internal static readonly int ShadowParams = Shader.PropertyToID("_ShadowParams");
         internal static readonly int ShAr = Shader.PropertyToID("_CloudLayerSHAr");
         internal static readonly int ShAg = Shader.PropertyToID("_CloudLayerSHAg");
@@ -85,6 +89,11 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         internal static readonly int MainLightCookieTexture = Shader.PropertyToID("_MainLightCookieTexture");
         internal static readonly int MainLightWorldToLight = Shader.PropertyToID("_MainLightWorldToLight");
         internal static readonly int MainLightCookieTextureFormat = Shader.PropertyToID("_MainLightCookieTextureFormat");
+#if URP_PBSKY
+        internal static readonly int AirSingleScatteringTexture = Shader.PropertyToID("_AirSingleScatteringTexture");
+        internal static readonly int AerosolSingleScatteringTexture = Shader.PropertyToID("_AerosolSingleScatteringTexture");
+        internal static readonly int MultipleScatteringTexture = Shader.PropertyToID("_MultipleScatteringTexture");
+#endif
     }
 
     /// <summary>
@@ -100,8 +109,15 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         _ambientPass?.Dispose();
         _ambientPass = null;
         CoreUtils.Destroy(_material);
+        CoreUtils.Destroy(_physicallyBasedSkyMaterial);
 
         _material = _cloudLayerShader != null ? CoreUtils.CreateEngineMaterial(_cloudLayerShader) : null;
+#if URP_PBSKY
+        Shader physicallyBasedSkyShader = Shader.Find(PhysicallyBasedSkyShaderName);
+        _physicallyBasedSkyMaterial = physicallyBasedSkyShader != null
+            ? CoreUtils.CreateEngineMaterial(physicallyBasedSkyShader)
+            : null;
+#endif
         int bakeCloudTextureKernel = _bakeCloudTexture != null ? _bakeCloudTexture.FindKernel("BakeCloudTexture") : -1;
         int bakeCloudShadowsKernel = _bakeCloudShadows != null ? _bakeCloudShadows.FindKernel("BakeCloudShadows") : -1;
 
@@ -114,7 +130,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         {
             renderPassEvent = RenderPassEvent.BeforeRendering,
         };
-        _renderPass = new CloudLayerRenderPass(_material, _resources)
+        _renderPass = new CloudLayerRenderPass(_material, _physicallyBasedSkyMaterial, _resources)
         {
             renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1,
         };
@@ -197,7 +213,23 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         bool dynamicAmbientProbe = false;
 #endif
         bool isProbeCamera = cameraType == CameraType.Reflection;
-        _renderPass.Setup(cloudLayer, cloudLayer.CastShadows && supportsCookies, _sunAttenuation, dynamicAmbientProbe);
+        bool physicallyBasedScattering = false;
+#if URP_PBSKY
+        VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
+        PhysicallyBasedSky physicallyBasedSky = stack.GetComponent<PhysicallyBasedSky>();
+        physicallyBasedScattering = visualEnvironment != null &&
+            visualEnvironment.IsActive() &&
+            visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased &&
+            physicallyBasedSky != null &&
+            physicallyBasedSky.IsActive() &&
+            physicallyBasedSky.atmosphericScattering.value;
+#endif
+        _renderPass.Setup(
+            cloudLayer,
+            cloudLayer.CastShadows && supportsCookies,
+            _sunAttenuation,
+            dynamicAmbientProbe,
+            physicallyBasedScattering);
 
 #if VC_AMBIENT
         if (dynamicAmbientProbe && !isProbeCamera)
@@ -229,6 +261,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         _ambientPass = null;
         CoreUtils.Destroy(_material);
         _material = null;
+        CoreUtils.Destroy(_physicallyBasedSkyMaterial);
+        _physicallyBasedSkyMaterial = null;
     }
 
     private static Light GetMainLight(UniversalLightData lightData, out Color lightColor)
@@ -716,23 +750,42 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         private static readonly Vector3[] FrustumCorners = new Vector3[4];
 
         private readonly Material _material;
+        private readonly Material _physicallyBasedSkyCombineMaterial;
+        private readonly int _physicallyBasedSkyPass;
         private readonly CloudLayerResources _resources;
         private CloudLayer _cloudLayer;
         private bool _shadowsEnabled;
+        private bool _physicallyBasedScattering;
 
-        internal CloudLayerRenderPass(Material material, CloudLayerResources resources)
+        internal CloudLayerRenderPass(Material material, Material physicallyBasedSkyMaterial, CloudLayerResources resources)
         {
             _material = material;
+            _physicallyBasedSkyCombineMaterial = physicallyBasedSkyMaterial;
+            _physicallyBasedSkyPass = physicallyBasedSkyMaterial != null
+                ? physicallyBasedSkyMaterial.FindPass(PhysicallyBasedSkyCombinePassName)
+                : -1;
             _resources = resources;
             ConfigureInput(ScriptableRenderPassInput.Depth);
         }
 
-        internal void Setup(CloudLayer cloudLayer, bool shadowsEnabled, bool sunAttenuation, bool dynamicAmbientProbe)
+        internal void Setup(
+            CloudLayer cloudLayer,
+            bool shadowsEnabled,
+            bool sunAttenuation,
+            bool dynamicAmbientProbe,
+            bool physicallyBasedScattering)
         {
             _cloudLayer = cloudLayer;
             _shadowsEnabled = shadowsEnabled;
+            _physicallyBasedScattering = physicallyBasedScattering;
             CoreUtils.SetKeyword(_material, "_PHYSICALLY_BASED_SUN", sunAttenuation);
             CoreUtils.SetKeyword(_material, "_CLOUDS_AMBIENT_PROBE", dynamicAmbientProbe);
+            if (_physicallyBasedSkyCombineMaterial != null &&
+                _physicallyBasedSkyCombineMaterial != _material)
+            {
+                CoreUtils.SetKeyword(_physicallyBasedSkyCombineMaterial, "_PHYSICALLY_BASED_SUN", sunAttenuation);
+                CoreUtils.SetKeyword(_physicallyBasedSkyCombineMaterial, "_CLOUDS_AMBIENT_PROBE", dynamicAmbientProbe);
+            }
         }
 
         /// <summary>
@@ -755,6 +808,28 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             _resources.Prepare(_cloudLayer, sunLight, cameraData.camera, _shadowsEnabled);
             TextureHandle cloudTexture = _resources.RecordCloudTextureBake(renderGraph, _cloudLayer, sunLight);
 
+            Material combineMaterial = _material;
+            int combinePass = 0;
+#if URP_PBSKY
+            PBSkyFrameResources physicallyBasedSkyResources = frameData.GetOrCreate<PBSkyFrameResources>();
+            bool usePhysicallyBasedSkyPass = _physicallyBasedScattering &&
+                _physicallyBasedSkyCombineMaterial != null &&
+                _physicallyBasedSkyPass >= 0 &&
+                physicallyBasedSkyResources.airSingleScattering.IsValid() &&
+                physicallyBasedSkyResources.aerosolSingleScattering.IsValid() &&
+                physicallyBasedSkyResources.multipleScattering.IsValid();
+            if (usePhysicallyBasedSkyPass)
+            {
+                combineMaterial = _physicallyBasedSkyCombineMaterial;
+                combinePass = _physicallyBasedSkyPass;
+            }
+            else if (_physicallyBasedScattering && !_missingPhysicallyBasedSkyPassLogged)
+            {
+                Debug.LogWarning($"Cloud Layer URP: PBSky shader pass '{PhysicallyBasedSkyCombinePassName}' or its frame resources are unavailable. Atmospheric scattering will not affect cloud layers; using the standard combine pass instead.");
+                _missingPhysicallyBasedSkyPassLogged = true;
+            }
+#endif
+
             using (var builder = renderGraph.AddRasterRenderPass<RenderPassData>(
                 "Cloud Layer: Combine with Camera Color",
                 out var passData,
@@ -762,7 +837,8 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             {
                 Color layerColorA = _cloudLayer.layerA.Color * sunColor;
                 Color layerColorB = _cloudLayer.layerB.Color * sunColor;
-                passData.material = _material;
+                passData.material = combineMaterial;
+                passData.shaderPass = combinePass;
                 passData.cloudTextureHandle = cloudTexture;
                 passData.cloudTexture = _resources.CloudTexture;
                 passData.flowmapAHandle = renderGraph.ImportTexture(_resources.FlowmapA);
@@ -803,11 +879,29 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
                 passData.viewRayTopRight = camera.transform.TransformVector(FrustumCorners[2]);
                 passData.viewRayBottomRight = camera.transform.TransformVector(FrustumCorners[3]);
                 SetAmbientProbe(ref passData, ambientProbe);
+#if URP_PBSKY
+                if (usePhysicallyBasedSkyPass)
+                {
+                    passData.airSingleScattering = physicallyBasedSkyResources.airSingleScattering;
+                    passData.aerosolSingleScattering = physicallyBasedSkyResources.aerosolSingleScattering;
+                    passData.multipleScattering = physicallyBasedSkyResources.multipleScattering;
+                }
+#endif
 
                 builder.UseTexture(passData.cloudTextureHandle, AccessFlags.Read);
                 builder.UseTexture(passData.flowmapAHandle, AccessFlags.Read);
                 builder.UseTexture(passData.flowmapBHandle, AccessFlags.Read);
                 builder.UseTexture(resourceData.cameraDepthTexture, AccessFlags.Read);
+#if URP_PBSKY
+                if (usePhysicallyBasedSkyPass)
+                {
+                    builder.UseTexture(passData.airSingleScattering, AccessFlags.Read);
+                    builder.UseTexture(passData.aerosolSingleScattering, AccessFlags.Read);
+                    builder.UseTexture(passData.multipleScattering, AccessFlags.Read);
+                    builder.AllowGlobalStateModification(true);
+                    builder.UseAllGlobalTextures(true);
+                }
+#endif
                 builder.SetRenderAttachment(resourceData.activeColorTexture, 0, AccessFlags.Write);
 
                 builder.SetRenderFunc(static (RenderPassData data, RasterGraphContext context) =>
@@ -836,10 +930,18 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
                     PropertyBlock.SetVector(ShaderIds.ViewRayTopLeft, data.viewRayTopLeft);
                     PropertyBlock.SetVector(ShaderIds.ViewRayTopRight, data.viewRayTopRight);
                     PropertyBlock.SetVector(ShaderIds.ViewRayBottomRight, data.viewRayBottomRight);
+#if URP_PBSKY
+                    if (data.airSingleScattering.IsValid())
+                        context.cmd.SetGlobalTexture(ShaderIds.AirSingleScatteringTexture, data.airSingleScattering);
+                    if (data.aerosolSingleScattering.IsValid())
+                        context.cmd.SetGlobalTexture(ShaderIds.AerosolSingleScatteringTexture, data.aerosolSingleScattering);
+                    if (data.multipleScattering.IsValid())
+                        context.cmd.SetGlobalTexture(ShaderIds.MultipleScatteringTexture, data.multipleScattering);
+#endif
                     context.cmd.DrawProcedural(
                         Matrix4x4.identity,
                         data.material,
-                        0,
+                        data.shaderPass,
                         MeshTopology.Triangles,
                         3,
                         1,
@@ -862,6 +964,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         private sealed class RenderPassData
         {
             internal Material material;
+            internal int shaderPass;
             internal TextureHandle cloudTextureHandle;
             internal TextureHandle flowmapAHandle;
             internal TextureHandle flowmapBHandle;
@@ -888,6 +991,11 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             internal Vector3 viewRayTopLeft;
             internal Vector3 viewRayTopRight;
             internal Vector3 viewRayBottomRight;
+#if URP_PBSKY
+            internal TextureHandle airSingleScattering;
+            internal TextureHandle aerosolSingleScattering;
+            internal TextureHandle multipleScattering;
+#endif
         }
     }
 }

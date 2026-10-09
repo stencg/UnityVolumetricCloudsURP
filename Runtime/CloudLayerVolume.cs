@@ -86,7 +86,7 @@ public sealed class CloudLayer : VolumeComponent, IPostProcessComponent
     public VolumeParameter<CloudMapMode> layers = new();
 
     /// <summary>Разрешение рассчитанной текстуры облаков.</summary>
-    [AdditionalProperty, Tooltip("Specifies the resolution of the precomputed cloud texture.")]
+    [AdditionalProperty, Tooltip("Controls the resolution of the intermediate cloud texture generated when Raymarching is enabled on an active layer. Higher values preserve finer cloud and lighting detail, but increase GPU memory use and recomputation cost. This setting has no effect when Raymarching is disabled on all active layers because the source textures are sampled directly.")]
     public EnumParameter<CloudResolution> resolution = new(CloudResolution.CloudResolution1024);
 
     /// <summary>Радиус планеты, используемый для кривизны слоя.</summary>
@@ -181,7 +181,7 @@ public sealed class CloudLayer : VolumeComponent, IPostProcessComponent
 
         /// <summary>Множитель освещения от ambient probe.</summary>
         [Tooltip("Controls the influence of the ambient probe on the cloud layer.")]
-        public ClampedFloatParameter ambientProbeDimmer = new(1.0f, 0.0f, 1.0f);
+        public ClampedFloatParameter ambientProbeDimmer = new(1.0f, 0.0f, 2.0f);
 
         /// <summary>Включает проекцию теней от слоя.</summary>
         [Tooltip("Projects cloud shadows and overrides the main directional light cookie for the current camera.")]

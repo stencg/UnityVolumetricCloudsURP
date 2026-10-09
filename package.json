@@ -1,6 +1,6 @@
 {
   "name": "com.jiaozi158.unity-volumetric-clouds-urp",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "displayName": "Unity Volumetric Clouds URP",
   "description": "Volumetric Clouds for Unity URP (Universal Render Pipeline).",
   "documentationUrl": "https://github.com/stencg/UnityVolumetricCloudsURP",

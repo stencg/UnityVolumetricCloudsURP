@@ -670,7 +670,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
                 width,
                 height,
                 slices: slices,
-                colorFormat: GraphicsFormat.R8G8_SNorm,
+                colorFormat: GraphicsFormat.R16G16_SFloat,
                 dimension: TextureDimension.Tex2DArray,
                 enableRandomWrite: true,
                 useMipMap: false,

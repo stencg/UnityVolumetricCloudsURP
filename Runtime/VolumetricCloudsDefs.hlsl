@@ -36,9 +36,8 @@ float _EarthRadius;
 half _AccumulationFactor;
 half _NormalizationFactor;
 half _CloudNearPlane;
-CBUFFER_END
 
-// Ambient Probe (unity_SH)
+// Cloud ambient probe SH coefficients.
 half4 clouds_SHAr;
 half4 clouds_SHAg;
 half4 clouds_SHAb;
@@ -46,6 +45,7 @@ half4 clouds_SHBr;
 half4 clouds_SHBg;
 half4 clouds_SHBb;
 half4 clouds_SHC;
+CBUFFER_END
 
 half _ImprovedTransmittanceBlend;
 float _PostExposure; // Exposure from the ColorAdjustments override

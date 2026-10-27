@@ -239,16 +239,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             hideFlags = HideFlags.HideAndDontSave
         };
 
-        // Store the current enable state of volumetric clouds in a global shader keyword
-        bool isDebugger = DebugManager.instance.isAnyDebugUIActive;
-        var stack = VolumeManager.instance.stack;
-        VolumetricClouds cloudsVolume = stack.GetComponent<VolumetricClouds>();
-        bool isVolumeActive = cloudsVolume != null && cloudsVolume.IsActive() && (!isDebugger || renderingDebugger);
-
-        if (!isActive || !isVolumeActive)
+        // Camera volume state is unavailable when the inspector creates a renderer.
+        // AddRenderPasses updates the keyword once a camera's volume stack is ready.
+        if (!isActive)
             Shader.DisableKeyword(VOLUMETRIC_CLOUDS);
-        else
-            Shader.EnableKeyword(VOLUMETRIC_CLOUDS);
 
         if (volumetricCloudsPass == null)
         {
@@ -330,6 +324,12 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     #endif
 
         var stack = VolumeManager.instance.stack;
+        if (stack == null)
+        {
+            Shader.DisableKeyword(VOLUMETRIC_CLOUDS);
+            return;
+        }
+
         VolumetricClouds cloudsVolume = stack.GetComponent<VolumetricClouds>();
         ColorAdjustments colorAdjustments = stack.GetComponent<ColorAdjustments>();
         bool isDebugger = DebugManager.instance.isAnyDebugUIActive;

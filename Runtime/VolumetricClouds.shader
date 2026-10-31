@@ -41,6 +41,13 @@ Shader "Hidden/Sky/VolumetricClouds"
         [HideInInspector] _NormalizationFactor("Normalization Factor", Float) = 0.7854
         [HideInInspector] _AccumulationFactor("Accumulation Factor", Float) = 0.95
         [HideInInspector] _CloudNearPlane("Cloud Near Plane", Float) = 0.3
+        [HideInInspector] clouds_SHAr("Cloud Ambient SH Ar", Vector) = (0.0, 0.0, 0.0, 0.0)
+        [HideInInspector] clouds_SHAg("Cloud Ambient SH Ag", Vector) = (0.0, 0.0, 0.0, 0.0)
+        [HideInInspector] clouds_SHAb("Cloud Ambient SH Ab", Vector) = (0.0, 0.0, 0.0, 0.0)
+        [HideInInspector] clouds_SHBr("Cloud Ambient SH Br", Vector) = (0.0, 0.0, 0.0, 0.0)
+        [HideInInspector] clouds_SHBg("Cloud Ambient SH Bg", Vector) = (0.0, 0.0, 0.0, 0.0)
+        [HideInInspector] clouds_SHBb("Cloud Ambient SH Bb", Vector) = (0.0, 0.0, 0.0, 0.0)
+        [HideInInspector] clouds_SHC("Cloud Ambient SH C", Vector) = (0.0, 0.0, 0.0, 0.0)
     }
 
     SubShader

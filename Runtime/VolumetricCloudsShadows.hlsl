@@ -20,6 +20,31 @@ half _ShadowIntensity;
 half _ShadowOpacityFallback;
 float3 _CameraPositionPS;
 //half _ShadowPlaneOffset;
+float3 _ShadowFadeCameraRight;
+float3 _ShadowFadeCameraForward;
+float4 _ShadowFadeAngles; // left, right, start, width (radians)
+float2 _ShadowFadeRcp; // reciprocal distance range and angular transition width
+float _ShadowFadeEnabled;
+
+float OffscreenShadowFadeValue(float3 cameraToSample)
+{
+    if (_ShadowFadeEnabled < 0.5)
+        return 1.0;
+
+    float horizontal = dot(cameraToSample, _ShadowFadeCameraRight);
+    float forward = dot(cameraToSample, _ShadowFadeCameraForward);
+    if (forward < 0.0)
+        return 0.0;
+    // A degenerate direction along camera up has no defined horizontal angle.
+    if (horizontal * horizontal + forward * forward < 1e-8)
+        return 1.0;
+    if (forward <= 0.0)
+        return 0.0;
+
+    float angle = atan2(horizontal, forward);
+    float outsideAngle = max(0.0, max(_ShadowFadeAngles.x - angle, angle - _ShadowFadeAngles.y));
+    return 1.0 - smoothstep(0.0, 1.0, (outsideAngle - _ShadowFadeAngles.z) * _ShadowFadeRcp.y);
+}
 
 half3 TraceVolumetricCloudsShadows(Varyings input) : SV_Target
 {
@@ -56,16 +81,25 @@ half3 TraceVolumetricCloudsShadows(Varyings input) : SV_Target
             float dist = (stepSize * i);
             float3 positionPS = rayOriginPS + rayDirection * dist;
 
-            // Get the coverage at intersection point
-            CloudCoverageData cloudCoverageData;
-            GetCloudCoverageData(positionPS, cloudCoverageData);
+            // Reject fully faded samples before fetching cloud density textures.
+            float3 cameraToSample = positionPS - _CameraPositionPS.xyz;
+            half distanceFade = saturate((length(cameraToSample) - _FadeInStart) * _ShadowFadeRcp.x);
+            [branch] if (distanceFade <= 0.0)
+                continue;
+            float angleFade = 1.0;
+            [branch] if (_ShadowFadeEnabled > 0.5)
+                angleFade = OffscreenShadowFadeValue(cameraToSample);
+            [branch] if (angleFade <= 0.0)
+                continue;
 
             // Compute the cloud density
             CloudProperties cloudProperties;
             EvaluateCloudProperties(positionPS, 0.0, 0.0, true, true, cloudProperties);
 
             // Apply the camera fade it to match the clouds perceived by the camera
-            cloudProperties.density *= DensityFadeValue(length(positionPS - _CameraPositionPS.xyz));
+            cloudProperties.density *= distanceFade;
+            [branch] if (_ShadowFadeEnabled > 0.5)
+                cloudProperties.density *= angleFade;
 
             if (cloudProperties.density > CLOUD_DENSITY_TRESHOLD)
             {

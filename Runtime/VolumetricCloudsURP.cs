@@ -436,6 +436,13 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #endif
     }
 
+    private static Vector2 GetCloudFadeInParameters(VolumetricClouds volume, float nearClipPlane)
+    {
+        bool automatic = volume.fadeInMode.value == VolumetricClouds.CloudFadeInMode.Automatic;
+        return new Vector2(Mathf.Max(automatic ? volume.altitudeRange.value * 0.2f : volume.fadeInStart.value, nearClipPlane),
+            automatic ? volume.altitudeRange.value * 0.3f : volume.fadeInDistance.value);
+    }
+
 #if OPTIMISATION
 #if ENABLE_BURST_1_0_0_OR_NEWER
     [Unity.Burst.BurstCompile(FloatMode = Unity.Burst.FloatMode.Fast)]
@@ -786,9 +793,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             cloudsMaterial.SetFloat(microErosionScale, cloudsVolume.microErosionScale.value);
             cloudsMaterial.SetFloat(microErosionFactor, cloudsVolume.microErosionFactor.value);
 
-            bool autoFadeIn = cloudsVolume.fadeInMode.value == VolumetricClouds.CloudFadeInMode.Automatic;
-            cloudsMaterial.SetFloat(fadeInStart, autoFadeIn ? Mathf.Max(cloudsVolume.altitudeRange.value * 0.2f, nearClipPlane) : Mathf.Max(cloudsVolume.fadeInStart.value, nearClipPlane));
-            cloudsMaterial.SetFloat(fadeInDistance, autoFadeIn ? cloudsVolume.altitudeRange.value * 0.3f : cloudsVolume.fadeInDistance.value);
+            Vector2 fadeIn = GetCloudFadeInParameters(cloudsVolume, nearClipPlane);
+            cloudsMaterial.SetFloat(fadeInStart, fadeIn.x);
+            cloudsMaterial.SetFloat(fadeInDistance, fadeIn.y);
             cloudsMaterial.SetFloat(multiScattering, 1.0f - cloudsVolume.multiScattering.value * 0.95f);
             cloudsMaterial.SetColor(scatteringTint, Color.white - cloudsVolume.scatteringTint.value * 0.75f);
             cloudsMaterial.SetFloat(ambientProbeDimmer, cloudsVolume.ambientLightProbeDimmer.value);
@@ -1618,6 +1625,11 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private static readonly int cloudShadowSunUp = Shader.PropertyToID("_CloudShadowSunUp");
         private static readonly int cloudShadowSunForward = Shader.PropertyToID("_CloudShadowSunForward");
         private static readonly int cameraPositionPS = Shader.PropertyToID("_CameraPositionPS");
+        private static readonly int shadowFadeCameraRight = Shader.PropertyToID("_ShadowFadeCameraRight");
+        private static readonly int shadowFadeCameraForward = Shader.PropertyToID("_ShadowFadeCameraForward");
+        private static readonly int shadowFadeAngles = Shader.PropertyToID("_ShadowFadeAngles");
+        private static readonly int shadowFadeRcp = Shader.PropertyToID("_ShadowFadeRcp");
+        private static readonly int shadowFadeEnabled = Shader.PropertyToID("_ShadowFadeEnabled");
         private static readonly int volumetricCloudsShadowOriginToggle = Shader.PropertyToID("_VolumetricCloudsShadowOriginToggle");
         private static readonly int volumetricCloudsShadowScale = Shader.PropertyToID("_VolumetricCloudsShadowScale");
         //private static readonly int shadowPlaneOffset = Shader.PropertyToID("_ShadowPlaneOffset");
@@ -1668,6 +1680,12 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
             internal Vector4 shadowOriginToggle;
             internal Vector4 shadowScale;
+            internal Vector4 cameraPositionPS;
+            internal Vector4 shadowFadeCameraRight;
+            internal Vector4 shadowFadeCameraForward;
+            internal Vector4 shadowFadeAngles;
+            internal Vector4 shadowFadeRcp;
+            internal float shadowFadeEnabled;
 
             internal bool isStereoEnabled;
         }
@@ -1679,6 +1697,14 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
             if (data.isStereoEnabled)
                 cmd.DisableShaderKeyword(STEREO_INSTANCING_ON);
+
+            // Use the camera parameters captured when this pass was recorded, rather than the latest Volume state.
+            data.cloudsMaterial.SetVector(cameraPositionPS, data.cameraPositionPS);
+            data.cloudsMaterial.SetVector(shadowFadeCameraRight, data.shadowFadeCameraRight);
+            data.cloudsMaterial.SetVector(shadowFadeCameraForward, data.shadowFadeCameraForward);
+            data.cloudsMaterial.SetVector(shadowFadeAngles, data.shadowFadeAngles);
+            data.cloudsMaterial.SetVector(shadowFadeRcp, data.shadowFadeRcp);
+            data.cloudsMaterial.SetFloat(shadowFadeEnabled, data.shadowFadeEnabled);
 
             // Render shadow cookie texture
             Blitter.BlitCameraTexture(cmd, data.shadowTexture, data.shadowTexture, data.cloudsMaterial, pass: 4);
@@ -1806,14 +1832,27 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 cloudsMaterial.SetVector(cloudShadowSunRight, float4(dirX, 0.0f));
                 cloudsMaterial.SetVector(cloudShadowSunUp, float4(dirY, 0.0f));
                 cloudsMaterial.SetVector(cloudShadowSunForward, float4(-targetLight.transform.forward, 0.0f));
-                cloudsMaterial.SetVector(cameraPositionPS, float4(cameraPos - planetCenterPos, 0.0f));
+                passData.cameraPositionPS = float4(cameraPos - planetCenterPos, 0.0f);
+                passData.shadowFadeCameraRight = camera.transform.right;
+                passData.shadowFadeCameraForward = camera.transform.forward;
+                // The inverse non-jittered projection accounts for aspect ratio and lens shift.
+                Matrix4x4 inverseProjection = camera.nonJitteredProjectionMatrix.inverse;
+                Vector3 left = inverseProjection.MultiplyPoint(new Vector3(-1.0f, 0.0f, 0.0f));
+                Vector3 right = inverseProjection.MultiplyPoint(new Vector3(1.0f, 0.0f, 0.0f));
+                float leftAngle = Mathf.Atan2(left.x, -left.z);
+                float rightAngle = Mathf.Atan2(right.x, -right.z);
+                passData.shadowFadeAngles = new Vector4(Mathf.Min(leftAngle, rightAngle), Mathf.Max(leftAngle, rightAngle),
+                    cloudsVolume.offscreenShadowFadeStart.value * Mathf.Deg2Rad,
+                    cloudsVolume.offscreenShadowFadeWidth.value * Mathf.Deg2Rad);
+                Vector2 fadeIn = GetCloudFadeInParameters(cloudsVolume, camera.nearClipPlane);
+                // Preserve the original angular smoothstep's rounded upper edge and the existing distance fade range.
+                float angularRange = (passData.shadowFadeAngles.z + Mathf.Max(passData.shadowFadeAngles.w, 1e-5f)) - passData.shadowFadeAngles.z;
+                passData.shadowFadeRcp = new Vector4(1.0f / (fadeIn.x + fadeIn.y), 1.0f / angularRange, 0.0f, 0.0f);
+                passData.shadowFadeEnabled = cloudsVolume.offscreenShadowFade.value ? 1.0f : 0.0f;
                 cloudsMaterial.SetVector(volumetricCloudsShadowOriginToggle, float4(c0, 0.0f));
 
                 // Apply light cookie settings
-                targetLight.cookie = null;
-                UniversalAdditionalLightData additonal = targetLight.GetComponent<UniversalAdditionalLightData>();
-                additonal.lightCookieSize = Vector2.one;
-                additonal.lightCookieOffset = Vector2.zero;
+                ResetShadowCookie();
 
                 // Apply shadow cookie
                 Vector2 uvScale = 1 / regionSize;

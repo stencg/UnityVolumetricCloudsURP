@@ -5,6 +5,13 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.13] - 2026-10-31
+
+### Added
+
+- Optional camera-relative horizontal fade for cloud shadow casters, with overridable start/width angles after Fade In. Defaults off; preserves existing Fade In, visible clouds, cookie filtering/opacity and receiver GI controls.
+- Per-camera non-jittered asymmetric projection and pass-time parameter binding, without shader variants. Camera rotation intentionally changes off-screen shadow coverage.
+
 ## [1.0.12] - 2026-10-27
 
 ### Fixed

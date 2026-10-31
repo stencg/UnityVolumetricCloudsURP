@@ -48,6 +48,10 @@ class VolumetricCloudsEditor : VolumeComponentEditor
     SerializedDataParameter m_FadeInMode;
     SerializedDataParameter m_FadeInStart;
     SerializedDataParameter m_FadeInDistance;
+    SerializedDataParameter m_OffscreenShadowFade;
+    SerializedDataParameter m_OffscreenShadowFadeStart;
+    SerializedDataParameter m_OffscreenShadowFadeWidth;
+    private static readonly GUIContent offscreenShadowFadeLabel = new("Off-screen Shadow Fade", "Fades shadow casting only outside the horizontal view. Camera rotation changes which clouds cast shadows.");
 
     // Shape
     // General
@@ -159,6 +163,9 @@ class VolumetricCloudsEditor : VolumeComponentEditor
         m_FadeInMode = Unpack(o.Find(x => x.fadeInMode));
         m_FadeInStart = Unpack(o.Find(x => x.fadeInStart));
         m_FadeInDistance = Unpack(o.Find(x => x.fadeInDistance));
+        m_OffscreenShadowFade = Unpack(o.Find(x => x.offscreenShadowFade));
+        m_OffscreenShadowFadeStart = Unpack(o.Find(x => x.offscreenShadowFadeStart));
+        m_OffscreenShadowFadeWidth = Unpack(o.Find(x => x.offscreenShadowFadeWidth));
 
         m_DensityMultiplier = Unpack(o.Find(x => x.densityMultiplier));
         m_ShapeFactor = Unpack(o.Find(x => x.shapeFactor));
@@ -343,6 +350,15 @@ class VolumetricCloudsEditor : VolumeComponentEditor
                 {
                     PropertyField(m_FadeInStart);
                     PropertyField(m_FadeInDistance);
+                }
+            }
+            PropertyField(m_OffscreenShadowFade, offscreenShadowFadeLabel);
+            if (m_OffscreenShadowFade.value.boolValue)
+            {
+                using (new IndentLevelScope())
+                {
+                    PropertyField(m_OffscreenShadowFadeStart);
+                    PropertyField(m_OffscreenShadowFadeWidth);
                 }
             }
         }

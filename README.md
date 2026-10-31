@@ -41,6 +41,34 @@ including the probe published by PBR sky; with `VC_AMBIENT` enabled, **Dynamic**
 ambient cubemap rendered from the current skybox. Its shadow option uses the main directional-light
 cookie, so **Light Cookies** must be enabled in the active URP asset.
  
+Off-screen cloud shadow fade
+------------
+After the Volume's Fade In controls, **Off-screen Shadow Fade** optionally limits shadow
+casting by each cloud sample's horizontal angle relative to the rendering camera.
+It defaults off and does not migrate profiles. **Shadow Fade Start (Degrees)** defaults
+to 5 (range 0–45); **Shadow Fade Width (Degrees)** defaults to 15 (range 0.1–45).
+With these settings, contribution remains full until 5 degrees beyond either screen
+edge, then smoothly reaches zero at 20 degrees beyond it. Behind-camera samples do
+not contribute. There is no vertical cutoff or distance fade-out: visible near/far
+clouds retain the existing Automatic or Manual Fade In calculation.
+
+The non-jittered projection supplies horizontal edges, including aspect ratio and
+asymmetric lens shift. Camera parameters are captured for each Render Graph pass.
+Visible cloud rendering, cookie projection/filtering, opacity and fallback opacity
+are unchanged. Both ordinary direct lighting and opted-in cookie-GI receivers read
+the resulting cookie; GI strength/floor controls are unaffected. Cloud shadows still
+require the existing `VC_SHADOWS` setup. Orthographic cameras remain unsupported.
+
+This is an artistic tradeoff: camera rotation changes which off-screen clouds cast
+shadows. A generous fade width softens transitions, especially with low sun angles.
+
+Validation (Unity 6000.0.65f1 / URP 17.3.0, DX11): 190 GPU/default assertions,
+80 isolated cookie/receiver assertions, 16 shader compilation checks, and Windows
+Player script compilation passed. Disabled cookies matched the original shader in
+Automatic and Manual modes; asymmetric Game/Scene View camera switching and shared
+direct/GI cookie sampling passed. Metal, packaged Player, and production-scene
+visual acceptance remain untested.
+
 Requirements
 ------------
 - Unity 6.0 and URP 17.0.4 or above.

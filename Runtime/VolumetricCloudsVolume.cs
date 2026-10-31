@@ -312,6 +312,20 @@ public class VolumetricClouds : VolumeComponent, IPostProcessComponent
     [Tooltip("Controls the distance that it takes for the clouds to reach their complete density.")]
     public MinFloatParameter fadeInDistance = new(5000.0f, 0.01f);
 
+    /// <summary>Smoothly fades shadow casting from off-screen clouds without affecting visible cloud rendering.</summary>
+    [Tooltip("Fades shadow casting outside the camera's horizontal view only. Camera rotation changes the shadow pattern; a generous width softens transitions.")]
+    public BoolParameter offscreenShadowFade = new(false);
+
+    /// <summary>Angular margin beyond either horizontal screen edge before shadow casting starts to fade.</summary>
+    [InspectorName("Shadow Fade Start (Degrees)")]
+    [Tooltip("Shadow casting only: degrees beyond either horizontal screen edge before fading begins.")]
+    public ClampedFloatParameter offscreenShadowFadeStart = new(5.0f, 0.0f, 45.0f);
+
+    /// <summary>Angular width over which off-screen shadow casting smoothly fades to zero.</summary>
+    [InspectorName("Shadow Fade Width (Degrees)")]
+    [Tooltip("Shadow casting only: angular width in degrees over which off-screen clouds fade to zero. No vertical or distance fade-out is applied.")]
+    public ClampedFloatParameter offscreenShadowFadeWidth = new(15.0f, 0.1f, 45.0f);
+
     public bool IsActive()
     {
         return state.value;

@@ -2,6 +2,7 @@
 #define URP_VOLUMETRIC_CLOUDS_DEFINES_HLSL
 
 CBUFFER_START(UnityPerMaterial)
+float4 _CloudEnvironmentCameraPosition;
 float4 _VolumetricCloudsSunDirection;
 half4 _VolumetricCloudsSunColor;
 float _Seed;

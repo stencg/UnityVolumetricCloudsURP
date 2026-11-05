@@ -6,6 +6,7 @@ Shader "Hidden/Sky/VolumetricClouds"
         [HideInInspector][NoScaleOffset] _CloudCurveTexture("Cloud LUT Curve Texture", 2D) = "white" {}
         [NoScaleOffset] _ErosionNoise("Erosion Noise Texture", 3D) = "white" {}
         [NoScaleOffset] _Worley128RGBA("Worley Noise Texture", 3D) = "white" {}
+        [HideInInspector] _CloudEnvironmentCameraPosition("Cloud Environment Camera Position", Vector) = (0.0, 0.0, 0.0, 0.0)
         [HideInInspector] _VolumetricCloudsSunDirection("Cloud Sun Direction", Vector) = (0.0, 0.0, 0.0, 0.0)
         [HideInInspector] _VolumetricCloudsSunColor("Cloud Sun Color", Vector) = (0.0, 0.0, 0.0, 0.0)
         [HideInInspector] _Seed("Private: Random Seed", Float) = 0.0
@@ -536,13 +537,13 @@ Shader "Hidden/Sky/VolumetricClouds"
 
         Pass
         {
-            // Compile this pass only when PBSky 1.0.0 or newer is available.
-            PackageRequirements { "com.jiaozi158.unity-physically-based-sky-urp": "1.0.0" }
+            // This self-contained pass is available for optional environment capture on every target.
 
             Name "Volumetric Clouds - Update PBSky Environment"
-            Tags { "LightMode" = "Volumetric Clouds" }
+            Tags { "LightMode" = "Volumetric Clouds" "CloudEnvironmentDistance" = "1" }
 
-            Blend One SrcAlpha, Zero One
+            Blend 0 One SrcAlpha, One Zero
+            Blend 1 One Zero
 			
             HLSLPROGRAM
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -577,11 +578,7 @@ Shader "Hidden/Sky/VolumetricClouds"
 
             #include "./VolumetricClouds.hlsl"
 
-        #ifdef PHYSICALLY_BASED_SKY
-            #include "Packages/com.jiaozi158.unity-physically-based-sky-urp/Shaders/PhysicallyBasedSkyRendering.hlsl"
-            #include "Packages/com.jiaozi158.unity-physically-based-sky-urp/Shaders/PhysicallyBasedSkyEvaluation.hlsl"
-            #include "Packages/com.jiaozi158.unity-physically-based-sky-urp/Shaders/AtmosphericScattering.hlsl"
-        #endif
+
 
             #define RAW_FAR_CLIP_THRESHOLD 1e-6
 
@@ -618,23 +615,26 @@ Shader "Hidden/Sky/VolumetricClouds"
                 return output;
             }
             
-            half4 frag(CustomVaryings input) : SV_Target
+            void frag(CustomVaryings input, out half4 cloudsColor : SV_Target0, out float cloudDistance : SV_Target1)
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 float2 screenUV = input.texcoord;
 
-                half4 cloudsColor = half4(0.0, 0.0, 0.0, 1.0);
+                cloudsColor = half4(0.0, 0.0, 0.0, 1.0);
+                cloudDistance = 0.0;
 
                 float3 invViewDirWS = normalize(input.positionWS - GetCameraPositionWS());
                 
 #ifdef _LOCAL_VOLUMETRIC_CLOUDS
                 CloudRay cloudRay;
-                cloudRay.originWS = GetCameraPositionWS();
+                cloudRay.originWS = _CloudEnvironmentCameraPosition.xyz;
                 cloudRay.direction = invViewDirWS;
                 cloudRay.maxRayLength = MAX_SKYBOX_VOLUMETRIC_CLOUDS_DISTANCE;
 #else
                 CloudRay cloudRay = BuildCloudsRay(screenUV, UNITY_RAW_FAR_CLIP_VALUE, invViewDirWS, false);
 #endif // _LOCAL_VOLUMETRIC_CLOUDS
+                // Camera-relative sky rays also start at the requested capture position.
+                cloudRay.originWS = _CloudEnvironmentCameraPosition.xyz;
                 cloudRay.integrationNoise = 0.0;
 
                 // Evaluate the cloud transmittance
@@ -645,36 +645,9 @@ Shader "Hidden/Sky/VolumetricClouds"
 
                 cloudsColor = half4(result.scattering.xyz, result.transmittance);
 
-                // Disabled due to performance issue
-                /*
-            #ifdef PHYSICALLY_BASED_SKY
-                if (_EnableAtmosphericScattering)
-                {
-                    // We don't force enabling clouds depth, but it's required to achieve physically accurate results
-                #ifdef _OUTPUT_CLOUDS_DEPTH
-                    float3 cloudPosWS = GetCameraPositionWS() + result.meanDistance * invViewDirWS;
-                    float4 cloudPosCS = TransformWorldToHClip(cloudPosWS);
-                    cloudPosCS.z /= cloudPosCS.w;
 
-                    float depth = result.invalidRay ? UNITY_RAW_FAR_CLIP_VALUE : cloudPosCS.z;
-                #else
-                    float depth = CLOUDS_RAW_FAR_CLIP_VALUE;
-                #endif
 
-                    PositionInputs posInput = GetPositionInput(input.positionCS.xy, _ScreenSize.zw, depth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V);
-
-                    half3 V = normalize(GetCameraPositionWS() - posInput.positionWS);
-
-                    half3 volColor, volOpacity = 0.0;
-
-                    EvaluateAtmosphericScattering(posInput, V, volColor, volOpacity);
-
-                    cloudsColor.xyz = volColor * (1.0 - cloudsColor.w) + (1.0 - volOpacity) * cloudsColor.xyz;
-                }
-            #endif
-                */
-
-                return half4(cloudsColor.xyz, cloudsColor.w);
+                cloudDistance = result.meanDistance;
             }
             ENDHLSL
         }

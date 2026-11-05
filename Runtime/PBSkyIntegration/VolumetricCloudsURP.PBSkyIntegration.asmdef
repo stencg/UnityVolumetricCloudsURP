@@ -4,7 +4,8 @@
         "VolumetricCloudsURP",
         "PBSkyURP",
         "Unity.Mathematics",
-        "Unity.RenderPipelines.Core.Runtime"
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
     ],
     "autoReferenced": true,
     "defineConstraints": [

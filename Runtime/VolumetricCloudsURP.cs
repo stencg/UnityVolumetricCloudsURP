@@ -26,7 +26,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     [SerializeField] private bool renderingDebugger = false;
 
     [Header("Performance")]
-    [Tooltip("Specifies if URP renders volumetric clouds in both real-time and baked reflection probes. \nVolumetric clouds in real-time reflection probes may reduce performance.")]
+    [Tooltip("Specifies if URP renders volumetric clouds in reflection probes and dynamic sky environment cubemaps. \nVolumetric clouds in real-time reflection probes may reduce performance.")]
     [SerializeField] private bool reflectionProbe = false;
     [Range(0.25f, 1.0f), Tooltip("The resolution scale for volumetric clouds rendering.")]
     [SerializeField] private float resolutionScale = 0.5f;
@@ -60,6 +60,27 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
     private VolumetricCloudsAmbientPass volumetricCloudsAmbientPass;
     private VolumetricCloudsShadowsPass volumetricCloudsShadowsPass;
     private Material runtimeMaterial;
+    private static readonly Dictionary<Camera, VolumetricCloudsURP> EnvironmentSources = new();
+    private static int environmentSourcesFrame = -1;
+
+    /// <summary>Gets the active camera's cloud source when reflection capture is enabled.</summary>
+    public static Material GetEnvironmentMaterialSource(Camera camera)
+    {
+        return environmentSourcesFrame == Time.frameCount && EnvironmentSources.TryGetValue(camera, out VolumetricCloudsURP feature) &&
+            feature != null && feature.isActive && feature.reflectionProbe ? feature.material : null;
+    }
+
+    /// <summary>Copies this camera's effective cloud settings to an environment-only material.</summary>
+    public static bool PrepareEnvironmentMaterial(Material source, Material target, Camera camera, UniversalLightData lightData)
+    {
+        if (environmentSourcesFrame != Time.frameCount ||
+            !EnvironmentSources.TryGetValue(camera, out VolumetricCloudsURP feature) ||
+            feature == null || !feature.isActive || !feature.reflectionProbe || feature.material != source || target == null)
+            return false;
+
+        feature.volumetricCloudsPass.PrepareEnvironmentMaterial(target, lightData, camera);
+        return true;
+    }
     private static bool compatibilityModeErrorLogged;
 
     // Pirnt message only once.
@@ -290,12 +311,19 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             volumetricCloudsShadowsPass = null;
         }
 #endif // VC_SHADOWS
+        EnvironmentSources.Clear();
         CoreUtils.Destroy(runtimeMaterial);
         runtimeMaterial = null;
     }
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
+        if (environmentSourcesFrame != Time.frameCount)
+        {
+            EnvironmentSources.Clear();
+            environmentSourcesFrame = Time.frameCount;
+        }
+        EnvironmentSources.Remove(renderingData.cameraData.camera);
         if (runtimeMaterial == null || volumetricCloudsPass == null)
             return;
 
@@ -384,6 +412,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             volumetricCloudsShadowsPass.cloudsVolume = cloudsVolume;
 #endif // VC_SHADOWS
 
+            EnvironmentSources[renderingData.cameraData.camera] = this;
             renderer.EnqueuePass(volumetricCloudsPass);
 
 #if VC_SHADOWS
@@ -616,6 +645,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private static readonly int shC = Shader.PropertyToID("clouds_SHC");
 
         // Cloud sun parameters are material-local and bound immediately before drawing.
+        private static readonly int cloudAmbientProbeTexture = Shader.PropertyToID("_VolumetricCloudsAmbientProbe");
         private static readonly int cloudSunDirectionID = Shader.PropertyToID("_VolumetricCloudsSunDirection");
         private static readonly int cloudSunColorID = Shader.PropertyToID("_VolumetricCloudsSunColor");
 
@@ -820,6 +850,18 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             PrepareCustomLutData(cloudsVolume);
         }
 
+        internal void PrepareEnvironmentMaterial(Material target, UniversalLightData lightData, Camera camera)
+        {
+            UpdateClouds(GetMainLight(lightData), camera);
+            target.CopyPropertiesFromMaterial(cloudsMaterial);
+            // The optional ambient cubemap is generated later; use the current sky SH until it exists.
+            if (dynamicAmbientProbe && !(cloudsMaterial.GetTexture(cloudAmbientProbeTexture) is RenderTexture))
+            {
+                target.DisableKeyword(cloudsAmbientProbe);
+                SetAmbientProbe(target, RenderSettings.ambientProbe);
+            }
+        }
+
         private void UpdateClouds(Light mainLight, Camera camera)
         {
             // Physically based sunlight uses the unattenuated color for attenuation inside clouds.
@@ -925,14 +967,19 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 #endif
                 }
 
-                cloudsMaterial.SetVector(shAr, new Vector4(ambientProbe[0, 3], ambientProbe[0, 1], ambientProbe[0, 2], ambientProbe[0, 0] - ambientProbe[0, 6]));
-                cloudsMaterial.SetVector(shAg, new Vector4(ambientProbe[1, 3], ambientProbe[1, 1], ambientProbe[1, 2], ambientProbe[1, 0] - ambientProbe[1, 6]));
-                cloudsMaterial.SetVector(shAb, new Vector4(ambientProbe[2, 3], ambientProbe[2, 1], ambientProbe[2, 2], ambientProbe[2, 0] - ambientProbe[2, 6]));
-                cloudsMaterial.SetVector(shBr, new Vector4(ambientProbe[0, 4], ambientProbe[0, 5], ambientProbe[0, 6] * 3, ambientProbe[0, 7]));
-                cloudsMaterial.SetVector(shBg, new Vector4(ambientProbe[1, 4], ambientProbe[1, 5], ambientProbe[1, 6] * 3, ambientProbe[1, 7]));
-                cloudsMaterial.SetVector(shBb, new Vector4(ambientProbe[2, 4], ambientProbe[2, 5], ambientProbe[2, 6] * 3, ambientProbe[2, 7]));
-                cloudsMaterial.SetVector(shC, new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1));
+                SetAmbientProbe(cloudsMaterial, ambientProbe);
             }
+        }
+
+        private static void SetAmbientProbe(Material cloudsMaterial, SphericalHarmonicsL2 ambientProbe)
+        {
+            cloudsMaterial.SetVector(shAr, new Vector4(ambientProbe[0, 3], ambientProbe[0, 1], ambientProbe[0, 2], ambientProbe[0, 0] - ambientProbe[0, 6]));
+            cloudsMaterial.SetVector(shAg, new Vector4(ambientProbe[1, 3], ambientProbe[1, 1], ambientProbe[1, 2], ambientProbe[1, 0] - ambientProbe[1, 6]));
+            cloudsMaterial.SetVector(shAb, new Vector4(ambientProbe[2, 3], ambientProbe[2, 1], ambientProbe[2, 2], ambientProbe[2, 0] - ambientProbe[2, 6]));
+            cloudsMaterial.SetVector(shBr, new Vector4(ambientProbe[0, 4], ambientProbe[0, 5], ambientProbe[0, 6] * 3, ambientProbe[0, 7]));
+            cloudsMaterial.SetVector(shBg, new Vector4(ambientProbe[1, 4], ambientProbe[1, 5], ambientProbe[1, 6] * 3, ambientProbe[1, 7]));
+            cloudsMaterial.SetVector(shBb, new Vector4(ambientProbe[2, 4], ambientProbe[2, 5], ambientProbe[2, 6] * 3, ambientProbe[2, 7]));
+            cloudsMaterial.SetVector(shC, new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1));
         }
 
         private static bool AmbientProbesEqual(SphericalHarmonicsL2 lhs, SphericalHarmonicsL2 rhs)

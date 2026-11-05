@@ -13,6 +13,8 @@ public static class CloudSkyIntegration
     {
         CloudSkyBridge.EnvironmentProvider = ReadEnvironment;
         CloudSkyBridge.ResourcesProvider = ReadResources;
+        PhysicallyBasedSkyURP.CloudEnvironmentMaterialSource = VolumetricCloudsURP.GetEnvironmentMaterialSource;
+        PhysicallyBasedSkyURP.PrepareCloudEnvironmentMaterial = VolumetricCloudsURP.PrepareEnvironmentMaterial;
     }
 
     private static CloudSkyEnvironment ReadEnvironment(VolumeStack stack, Vector3 position)

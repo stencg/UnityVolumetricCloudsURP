@@ -228,9 +228,9 @@ class VolumetricCloudsEditor : VolumeComponentEditor
 
     #if URP_PBSKY
         var stack = VolumeManager.instance.stack;
-        PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
+        CloudSkyEnvironment sky = CloudSkyBridge.ReadEnvironment(stack, Vector3.zero);
         bool missingCloudDepth = !clouds.OutputCloudsDepth && !clouds.OutputToSceneDepth;
-        if (missingCloudDepth && pbrSky != null && pbrSky.atmosphericScattering.value)
+        if (missingCloudDepth && sky.atmosphericScattering)
         {
             EditorGUILayout.HelpBox(k_AtmosphericScatteringDepthMessage, MessageType.Warning, wide: true);
             EditorGUILayout.Space();
@@ -273,8 +273,7 @@ class VolumetricCloudsEditor : VolumeComponentEditor
         PropertyField(m_Enable);
 
     #if URP_PBSKY
-        VisualEnvironment visualEnvVolume = stack.GetComponent<VisualEnvironment>();
-        bool hasVisualEnvVolume = visualEnvVolume != null && visualEnvVolume.IsActive() && visualEnvVolume.skyType.value != 0;
+        bool hasVisualEnvVolume = sky.hasSky;
 
         if (hasVisualEnvVolume) { EditorGUILayout.HelpBox(k_LocalCloudsMessage, MessageType.Info, wide: true); }
         using (new EditorGUI.DisabledScope(hasVisualEnvVolume))

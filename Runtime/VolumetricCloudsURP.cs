@@ -345,8 +345,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         if (isVolumeActive && (renderingData.cameraData.cameraType == CameraType.Game || renderingData.cameraData.cameraType == CameraType.SceneView || isProbeCamera))
         {
         #if URP_PBSKY
-            VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
-            PhysicallyBasedSky pbrSky = stack.GetComponent<PhysicallyBasedSky>();
+            CloudSkyEnvironment visualEnvironment = CloudSkyBridge.ReadEnvironment(stack, renderingData.cameraData.camera.transform.position);
         #endif
 #if VC_AMBIENT
             bool dynamicAmbientProbe = ambientProbe == CloudsAmbientMode.Dynamic;
@@ -373,9 +372,8 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 requiredInputs |= ScriptableRenderPassInput.Color;
             volumetricCloudsPass.ConfigureInput(requiredInputs);
         #if URP_PBSKY
-            Fog fog = stack.GetComponent<Fog>();
-            volumetricCloudsPass.hasPhysicallyBasedScattering = visualEnvironment != null && visualEnvironment.IsActive() && visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased && pbrSky != null && pbrSky.atmosphericScattering.value;
-            volumetricCloudsPass.hasAtmosphericScattering = volumetricCloudsPass.hasPhysicallyBasedScattering || fog != null && fog.IsActive();
+            volumetricCloudsPass.hasPhysicallyBasedScattering = visualEnvironment.hasPhysicallyBasedScattering;
+            volumetricCloudsPass.hasAtmosphericScattering = volumetricCloudsPass.hasPhysicallyBasedScattering || visualEnvironment.hasFog;
             volumetricCloudsPass.visualEnvVolume = visualEnvironment;
 #else
             volumetricCloudsPass.hasPhysicallyBasedScattering = false;
@@ -469,7 +467,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         public VolumetricClouds cloudsVolume;
         public ColorAdjustments colorAdjustments;
     #if URP_PBSKY
-        public VisualEnvironment visualEnvVolume;
+        public CloudSkyEnvironment visualEnvVolume;
     #endif
         public float resolutionScale;
         public CloudsUpscaleMode upscaleMode;
@@ -617,11 +615,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private static readonly int shBb = Shader.PropertyToID("clouds_SHBb");
         private static readonly int shC = Shader.PropertyToID("clouds_SHC");
 
-        // Main light globals � set manually in the raster pass because URP's light
-        // setup unsafe pass has no resource dependency on the clouds pass and may be
-        // reordered after it by the render graph compiler.
-        private static readonly int mainLightPositionID = Shader.PropertyToID("_MainLightPosition");
-        private static readonly int mainLightColorID = Shader.PropertyToID("_MainLightColor");
+        // Cloud sun parameters are material-local and bound immediately before drawing.
+        private static readonly int cloudSunDirectionID = Shader.PropertyToID("_VolumetricCloudsSunDirection");
+        private static readonly int cloudSunColorID = Shader.PropertyToID("_VolumetricCloudsSunColor");
 
         private const string localClouds = "_LOCAL_VOLUMETRIC_CLOUDS";
         private const string microErosion = "_CLOUDS_MICRO_EROSION";
@@ -673,10 +669,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private void UpdateMaterialProperties(Vector3 cameraPosition, float nearClipPlane)
         {
 #if URP_PBSKY
-            bool isVolumeActive = visualEnvVolume != null && visualEnvVolume.IsActive() && visualEnvVolume.skyType.value != 0;
+            bool isVolumeActive = visualEnvVolume.hasSky;
             if (isVolumeActive)
             {
-                if (visualEnvVolume.renderingSpace.value == VisualEnvironment.RenderingSpace.World) { cloudsMaterial.EnableKeyword(localClouds); }
+                if (visualEnvVolume.worldSpace) { cloudsMaterial.EnableKeyword(localClouds); }
                 else { cloudsMaterial.DisableKeyword(localClouds); }
             }
             else
@@ -698,8 +694,13 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             if (dynamicAmbientProbe) { cloudsMaterial.EnableKeyword(cloudsAmbientProbe); }
             else { cloudsMaterial.DisableKeyword(cloudsAmbientProbe); }
 
-            if (outputDepth) { cloudsMaterial.EnableKeyword(outputCloudsDepth); }
+#if VC_DEPTH
+            if (outputDepth || outputToSceneDepth) { cloudsMaterial.EnableKeyword(outputCloudsDepth); }
             else { cloudsMaterial.DisableKeyword(outputCloudsDepth); }
+#else
+            // The combine pass must use its far-depth fallback when no cloud depth texture is produced.
+            cloudsMaterial.DisableKeyword(outputCloudsDepth);
+#endif
 
             if (sunAttenuation) { cloudsMaterial.EnableKeyword(physicallyBasedSun); }
             else { cloudsMaterial.DisableKeyword(physicallyBasedSun); }
@@ -715,9 +716,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             cloudsMaterial.SetFloat(maxStepSize, cloudsVolume.altitudeRange.value / 8.0f);
 
 #if URP_PBSKY
-            float4 planetCenterRad = visualEnvVolume.GetPlanetCenterRadius(cameraPosition);
+            float4 planetCenterRad = visualEnvVolume.planetCenterRadius;
             float actualEarthRad = isVolumeActive ? planetCenterRad.w : Mathf.Lerp(1.0f, 0.025f, cloudsVolume.earthCurvature.value) * earthRad;
-            bool useVisualEnvironmentPlanet = isVolumeActive && visualEnvVolume.renderingSpace.value == VisualEnvironment.RenderingSpace.World;
+            bool useVisualEnvironmentPlanet = isVolumeActive && visualEnvVolume.worldSpace;
             planetCenterRad = useVisualEnvironmentPlanet ? planetCenterRad : float4(0.0f, -actualEarthRad, 0.0f, actualEarthRad);
 
             cloudsMaterial.SetVector(planetCenterRadius, planetCenterRad);
@@ -821,7 +822,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
         private void UpdateClouds(Light mainLight, Camera camera)
         {
-            // When using PBSky, we already applied the sun attenuation to "_MainLightColor"
+            // Physically based sunlight uses the unattenuated color for attenuation inside clouds.
             if (sunAttenuation)
             {
                 bool isLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
@@ -830,7 +831,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                     mainLightColor = (isLinearColorSpace ? mainLight.color.linear : mainLight.color.gamma) * (mainLight.useColorTemperature ? Mathf.CorrelatedColorTemperatureToRGB(mainLight.colorTemperature) : Color.white) * mainLight.intensity;
 
 #if URP_PHYSICAL_LIGHT
-                bool isPhysicalLight = mainLight.GetComponent<AdditionalLightData>() != null;
+                bool isPhysicalLight = mainLight != null && mainLight.GetComponent<AdditionalLightData>() != null;
 
                 mainLightColor = isPhysicalLight ? mainLightColor : mainLightColor * PI;
 #else
@@ -1055,10 +1056,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             internal bool setKeyword;
             internal bool keywordEnabled;
             internal int pass;
-            internal Vector4 mainLightPosition;
-            internal Vector4 mainLightColor;
+            internal Vector4 cloudSunDirection;
+            internal Vector4 cloudSunColor;
             internal Vector4 screenResolution;
-            internal bool setMainLight;
+            internal bool setCloudSun;
 #if VC_DENOISE
             internal bool setHistoryValid;
             internal bool historyValid;
@@ -1071,10 +1072,10 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
         private static void DrawCloudRaster(CloudRasterData data, RasterGraphContext context)
         {
             RasterCommandBuffer cmd = context.cmd;
-            if (data.setMainLight)
+            if (data.setCloudSun)
             {
-                cmd.SetGlobalVector(mainLightPositionID, data.mainLightPosition);
-                cmd.SetGlobalVector(mainLightColorID, data.mainLightColor);
+                data.material.SetVector(cloudSunDirectionID, data.cloudSunDirection);
+                data.material.SetVector(cloudSunColorID, data.cloudSunColor);
             }
             if (data.screenResolution.x > 0.0f)
                 cmd.SetGlobalVector(screenResolution, data.screenResolution);
@@ -1217,9 +1218,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 data.setKeyword = true;
                 data.keywordEnabled = perceptual;
                 data.pass = 0;
-                data.setMainLight = true;
-                data.mainLightPosition = lightPosition;
-                data.mainLightColor = lightColor;
+                data.setCloudSun = true;
+                data.cloudSunDirection = lightPosition;
+                data.cloudSunColor = lightColor;
                 builder.AllowGlobalStateModification(true);
                 builder.UseTexture(resources.cameraDepthTexture, AccessFlags.Read);
                 if (traceSource.IsValid())
@@ -1275,7 +1276,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
             Material combineMaterial = cloudsMaterial;
             int combineShaderPass = combinePass;
 #if URP_PBSKY
-            PBSkyFrameResources physicallyBasedSkyResources = frameData.GetOrCreate<PBSkyFrameResources>();
+            CloudSkyResources physicallyBasedSkyResources = CloudSkyBridge.ReadResources(frameData);
             bool hasRequiredScatteringResources = !hasPhysicallyBasedScattering ||
                 (physicallyBasedSkyResources.airSingleScattering.IsValid() &&
                 physicallyBasedSkyResources.aerosolSingleScattering.IsValid() &&
@@ -1607,7 +1608,7 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
 
         public VolumetricClouds cloudsVolume;
 #if URP_PBSKY
-        public VisualEnvironment visualEnvVolume;
+        public CloudSkyEnvironment visualEnvVolume;
 #endif
         private readonly Material cloudsMaterial;
 
@@ -1787,9 +1788,9 @@ public class VolumetricCloudsURP : ScriptableRendererFeature
                 float3 c2 = lsToWSMat.MultiplyPoint(lightSpaceBounds.center + new Vector3(-lightSpaceBounds.extents.x, lightSpaceBounds.extents.y, lightSpaceBounds.extents.z));
 
 #if URP_PBSKY
-                bool isVolumeActive = visualEnvVolume != null && visualEnvVolume.IsActive();
+                bool isVolumeActive = visualEnvVolume.active;
 
-                float4 planetCenterRad = visualEnvVolume.GetPlanetCenterRadius(camera.transform.position);
+                float4 planetCenterRad = visualEnvVolume.planetCenterRadius;
                 float actualEarthRad = isVolumeActive ? planetCenterRad.w : Mathf.Lerp(1.0f, 0.025f, cloudsVolume.earthCurvature.value) * VolumetricCloudsPass.earthRad;
                 float3 planetCenterPos = isVolumeActive ? planetCenterRad.xyz : float3(0.0f, -actualEarthRad, 0.0f);
 #else

@@ -1,0 +1,20 @@
+{
+    "name": "VolumetricCloudsURP.PBSkyIntegration",
+    "references": [
+        "VolumetricCloudsURP",
+        "PBSkyURP",
+        "Unity.Mathematics",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "URP_PBSKY"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.jiaozi158.unity-physically-based-sky-urp",
+            "expression": "1.0.0",
+            "define": "URP_PBSKY"
+        }
+    ]
+}

@@ -6,6 +6,8 @@ Shader "Hidden/Sky/VolumetricClouds"
         [HideInInspector][NoScaleOffset] _CloudCurveTexture("Cloud LUT Curve Texture", 2D) = "white" {}
         [NoScaleOffset] _ErosionNoise("Erosion Noise Texture", 3D) = "white" {}
         [NoScaleOffset] _Worley128RGBA("Worley Noise Texture", 3D) = "white" {}
+        [HideInInspector] _VolumetricCloudsSunDirection("Cloud Sun Direction", Vector) = (0.0, 0.0, 0.0, 0.0)
+        [HideInInspector] _VolumetricCloudsSunColor("Cloud Sun Color", Vector) = (0.0, 0.0, 0.0, 0.0)
         [HideInInspector] _Seed("Private: Random Seed", Float) = 0.0
         [HideInInspector] _VolumetricCloudsAmbientProbe("Ambient Probe", CUBE) = "grey" {}
         [HideInInspector] _NumPrimarySteps("Ray Steps", Float) = 32.0

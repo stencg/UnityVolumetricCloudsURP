@@ -220,16 +220,9 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
         bool physicallyBasedScattering = false;
         bool fogEnabled = false;
 #if URP_PBSKY
-        VisualEnvironment visualEnvironment = stack.GetComponent<VisualEnvironment>();
-        PhysicallyBasedSky physicallyBasedSky = stack.GetComponent<PhysicallyBasedSky>();
-        Fog fog = stack.GetComponent<Fog>();
-        physicallyBasedScattering = visualEnvironment != null &&
-            visualEnvironment.IsActive() &&
-            visualEnvironment.skyType.value == (int)VisualEnvironment.SkyType.PhysicallyBased &&
-            physicallyBasedSky != null &&
-            physicallyBasedSky.IsActive() &&
-            physicallyBasedSky.atmosphericScattering.value;
-        fogEnabled = fog != null && fog.IsActive();
+        CloudSkyEnvironment sky = CloudSkyBridge.ReadEnvironment(stack, renderingData.cameraData.camera.transform.position);
+        physicallyBasedScattering = sky.hasPhysicallyBasedScattering && sky.physicallyBasedSkyActive;
+        fogEnabled = sky.hasFog;
 #endif
         _renderPass.Setup(
             cloudLayer,
@@ -896,7 +889,7 @@ public sealed class CloudLayerURP : ScriptableRendererFeature
             Material combineMaterial = _material;
             int combinePass = 0;
 #if URP_PBSKY
-            PBSkyFrameResources physicallyBasedSkyResources = frameData.GetOrCreate<PBSkyFrameResources>();
+            CloudSkyResources physicallyBasedSkyResources = CloudSkyBridge.ReadResources(frameData);
             bool hasScatteringResources = !_physicallyBasedScattering ||
                 (physicallyBasedSkyResources.airSingleScattering.IsValid() &&
                 physicallyBasedSkyResources.aerosolSingleScattering.IsValid() &&

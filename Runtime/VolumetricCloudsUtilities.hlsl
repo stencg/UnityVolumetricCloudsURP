@@ -677,8 +677,8 @@ void EvaluateCloud(CloudProperties cloudProperties, half3 rayDirection,
     const half extinction = cloudProperties.density * cloudProperties.sigmaT;
     const half transmittance = exp(-extinction * stepSize);
 
-    Light sun = GetMainLight();
-    half cosAngle = dot(rayDirection, sun.direction);
+    half3 sunDirection = _VolumetricCloudsSunDirection.xyz;
+    half cosAngle = dot(rayDirection, sunDirection);
 
     // Evaluate the phase function for each of the octaves
     half2 phaseFunction = half2(0.0, 0.0);
@@ -702,7 +702,7 @@ void EvaluateCloud(CloudProperties cloudProperties, half3 rayDirection,
     half powderEffect = PowderEffect(cloudProperties.density, cosAngle, _PowderEffectIntensity);
 
     // Evaluate the sun visibility
-    half3 sunTransmittance = EvaluateSunTransmittance(currentPositionPS, sun.direction, phaseFunction);
+    half3 sunTransmittance = EvaluateSunTransmittance(currentPositionPS, sunDirection, phaseFunction);
 
     // Compute luminance separately to factor out color multiplication at the end of the loop
     // Use 1 as placeholder to compute the 'transfer function'

@@ -182,13 +182,13 @@ VolumetricRayResult TraceVolumetricRay(CloudRay cloudRay)
                 float3 currentPositionPS = ConvertToPS(cloudRay.originWS) + volumetricRay.meanDistance * cloudRay.direction;
                 float relativeHeight = EvaluateNormalizedCloudHeight(currentPositionPS);
 
-                Light sun = GetMainLight();
+                half3 sunDirection = _VolumetricCloudsSunDirection.xyz;
 
                 // Evaluate the sun color at the position
             #ifdef _PHYSICALLY_BASED_SUN
-                half3 sunColor = _SunColor * EvaluateSunColorAttenuation(currentPositionPS, sun.direction, true) * _SunLightDimmer; // _SunColor includes PI
+                half3 sunColor = _SunColor * EvaluateSunColorAttenuation(currentPositionPS, sunDirection, true) * _SunLightDimmer; // _SunColor includes PI
             #else
-                half3 sunColor = sun.color * PI * _SunLightDimmer;
+                half3 sunColor = _VolumetricCloudsSunColor.rgb * PI * _SunLightDimmer;
             #endif
 
                 // Evaluate the environement lighting contribution
